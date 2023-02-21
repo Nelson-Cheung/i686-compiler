@@ -79,9 +79,6 @@ static void show_mnt_opts(struct seq_file *m, struct vfsmount *mnt)
 		if (mnt->mnt_flags & fs_infop->flag)
 			seq_puts(m, fs_infop->str);
 	}
-
-	if (mnt_user_ns(mnt) != &init_user_ns)
-		seq_puts(m, ",idmapped");
 }
 
 static inline void mangle(struct seq_file *m, const char *s)
@@ -323,8 +320,7 @@ static int mountstats_open(struct inode *inode, struct file *file)
 
 const struct file_operations proc_mounts_operations = {
 	.open		= mounts_open,
-	.read_iter	= seq_read_iter,
-	.splice_read	= generic_file_splice_read,
+	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= mounts_release,
 	.poll		= mounts_poll,
@@ -332,8 +328,7 @@ const struct file_operations proc_mounts_operations = {
 
 const struct file_operations proc_mountinfo_operations = {
 	.open		= mountinfo_open,
-	.read_iter	= seq_read_iter,
-	.splice_read	= generic_file_splice_read,
+	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= mounts_release,
 	.poll		= mounts_poll,
@@ -341,8 +336,7 @@ const struct file_operations proc_mountinfo_operations = {
 
 const struct file_operations proc_mountstats_operations = {
 	.open		= mountstats_open,
-	.read_iter	= seq_read_iter,
-	.splice_read	= generic_file_splice_read,
+	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= mounts_release,
 };

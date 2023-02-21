@@ -299,19 +299,19 @@ static int qtnf_pcie_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	sysctl_bar = qtnf_map_bar(pdev, QTN_SYSCTL_BAR);
 	if (IS_ERR(sysctl_bar)) {
 		pr_err("failed to map BAR%u\n", QTN_SYSCTL_BAR);
-		return PTR_ERR(sysctl_bar);
+		return ret;
 	}
 
 	dmareg_bar = qtnf_map_bar(pdev, QTN_DMA_BAR);
 	if (IS_ERR(dmareg_bar)) {
 		pr_err("failed to map BAR%u\n", QTN_DMA_BAR);
-		return PTR_ERR(dmareg_bar);
+		return ret;
 	}
 
 	epmem_bar = qtnf_map_bar(pdev, QTN_SHMEM_BAR);
 	if (IS_ERR(epmem_bar)) {
 		pr_err("failed to map BAR%u\n", QTN_SHMEM_BAR);
-		return PTR_ERR(epmem_bar);
+		return ret;
 	}
 
 	chipid = qtnf_chip_id_get(sysctl_bar);
@@ -480,7 +480,18 @@ static struct pci_driver qtnf_pcie_drv_data = {
 #endif
 };
 
-module_pci_driver(qtnf_pcie_drv_data)
+static int __init qtnf_pcie_register(void)
+{
+	return pci_register_driver(&qtnf_pcie_drv_data);
+}
+
+static void __exit qtnf_pcie_exit(void)
+{
+	pci_unregister_driver(&qtnf_pcie_drv_data);
+}
+
+module_init(qtnf_pcie_register);
+module_exit(qtnf_pcie_exit);
 
 MODULE_AUTHOR("Quantenna Communications");
 MODULE_DESCRIPTION("Quantenna PCIe bus driver for 802.11 wireless LAN.");

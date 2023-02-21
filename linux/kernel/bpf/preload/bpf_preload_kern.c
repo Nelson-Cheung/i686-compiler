@@ -60,12 +60,9 @@ static int finish(void)
 			 &magic, sizeof(magic), &pos);
 	if (n != sizeof(magic))
 		return -EPIPE;
-
 	tgid = umd_ops.info.tgid;
-	if (tgid) {
-		wait_event(tgid->wait_pidfd, thread_group_exited(tgid));
-		umd_cleanup_helper(&umd_ops.info);
-	}
+	wait_event(tgid->wait_pidfd, thread_group_exited(tgid));
+	umd_ops.info.tgid = NULL;
 	return 0;
 }
 
@@ -83,18 +80,10 @@ static int __init load_umd(void)
 
 static void __exit fini_umd(void)
 {
-	struct pid *tgid;
-
 	bpf_preload_ops = NULL;
-
 	/* kill UMD in case it's still there due to earlier error */
-	tgid = umd_ops.info.tgid;
-	if (tgid) {
-		kill_pid(tgid, SIGKILL, 1);
-
-		wait_event(tgid->wait_pidfd, thread_group_exited(tgid));
-		umd_cleanup_helper(&umd_ops.info);
-	}
+	kill_pid(umd_ops.info.tgid, SIGKILL, 1);
+	umd_ops.info.tgid = NULL;
 	umd_unload_blob(&umd_ops.info);
 }
 late_initcall(load_umd);

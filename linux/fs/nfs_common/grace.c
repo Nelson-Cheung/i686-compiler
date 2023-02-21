@@ -42,6 +42,7 @@ EXPORT_SYMBOL_GPL(locks_start_grace);
 
 /**
  * locks_end_grace
+ * @net: net namespace that this lock manager belongs to
  * @lm: who this grace period is for
  *
  * Call this function to state that the given lock manager is ready to
@@ -68,20 +69,15 @@ __state_in_grace(struct net *net, bool open)
 	if (!open)
 		return !list_empty(grace_list);
 
-	spin_lock(&grace_lock);
 	list_for_each_entry(lm, grace_list, list) {
-		if (lm->block_opens) {
-			spin_unlock(&grace_lock);
+		if (lm->block_opens)
 			return true;
-		}
 	}
-	spin_unlock(&grace_lock);
 	return false;
 }
 
 /**
  * locks_in_grace
- * @net: network namespace
  *
  * Lock managers call this function to determine when it is OK for them
  * to answer ordinary lock requests, and when they should accept only

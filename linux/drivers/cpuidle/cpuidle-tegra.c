@@ -48,6 +48,11 @@ enum tegra_state {
 static atomic_t tegra_idle_barrier;
 static atomic_t tegra_abort_flag;
 
+static inline bool tegra_cpuidle_using_firmware(void)
+{
+	return firmware_ops->prepare_idle && firmware_ops->do_idle;
+}
+
 static void tegra_cpuidle_report_cpus_state(void)
 {
 	unsigned long cpu, lcpu, csr;
@@ -130,9 +135,13 @@ static int tegra_cpuidle_c7_enter(void)
 {
 	int err;
 
-	err = call_firmware_op(prepare_idle, TF_PM_MODE_LP2_NOFLUSH_L2);
-	if (err && err != -ENOSYS)
-		return err;
+	if (tegra_cpuidle_using_firmware()) {
+		err = call_firmware_op(prepare_idle, TF_PM_MODE_LP2_NOFLUSH_L2);
+		if (err)
+			return err;
+
+		return call_firmware_op(do_idle, 0);
+	}
 
 	return cpu_suspend(0, tegra30_pm_secondary_cpu_suspend);
 }
@@ -347,7 +356,9 @@ static int tegra_cpuidle_probe(struct platform_device *pdev)
 	 * is disabled.
 	 */
 	if (!IS_ENABLED(CONFIG_PM_SLEEP)) {
-		tegra_cpuidle_disable_state(TEGRA_C7);
+		if (!tegra_cpuidle_using_firmware())
+			tegra_cpuidle_disable_state(TEGRA_C7);
+
 		tegra_cpuidle_disable_state(TEGRA_CC6);
 	}
 

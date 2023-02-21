@@ -158,16 +158,16 @@ static int get_energy_counter(struct powercap_zone *power_zone,
 	/* prevent CPU hotplug, make sure the RAPL domain does not go
 	 * away while reading the counter.
 	 */
-	cpus_read_lock();
+	get_online_cpus();
 	rd = power_zone_to_rapl_domain(power_zone);
 
 	if (!rapl_read_data_raw(rd, ENERGY_COUNTER, true, &energy_now)) {
 		*energy_raw = energy_now;
-		cpus_read_unlock();
+		put_online_cpus();
 
 		return 0;
 	}
-	cpus_read_unlock();
+	put_online_cpus();
 
 	return -EIO;
 }
@@ -216,11 +216,11 @@ static int set_domain_enable(struct powercap_zone *power_zone, bool mode)
 	if (rd->state & DOMAIN_STATE_BIOS_LOCKED)
 		return -EACCES;
 
-	cpus_read_lock();
+	get_online_cpus();
 	rapl_write_data_raw(rd, PL1_ENABLE, mode);
 	if (rapl_defaults->set_floor_freq)
 		rapl_defaults->set_floor_freq(rd, mode);
-	cpus_read_unlock();
+	put_online_cpus();
 
 	return 0;
 }
@@ -234,13 +234,13 @@ static int get_domain_enable(struct powercap_zone *power_zone, bool *mode)
 		*mode = false;
 		return 0;
 	}
-	cpus_read_lock();
+	get_online_cpus();
 	if (rapl_read_data_raw(rd, PL1_ENABLE, true, &val)) {
-		cpus_read_unlock();
+		put_online_cpus();
 		return -EIO;
 	}
 	*mode = val;
-	cpus_read_unlock();
+	put_online_cpus();
 
 	return 0;
 }
@@ -317,7 +317,7 @@ static int set_power_limit(struct powercap_zone *power_zone, int cid,
 	int ret = 0;
 	int id;
 
-	cpus_read_lock();
+	get_online_cpus();
 	rd = power_zone_to_rapl_domain(power_zone);
 	id = contraint_to_pl(rd, cid);
 	if (id < 0) {
@@ -350,7 +350,7 @@ static int set_power_limit(struct powercap_zone *power_zone, int cid,
 	if (!ret)
 		package_power_limit_irq_save(rp);
 set_exit:
-	cpus_read_unlock();
+	put_online_cpus();
 	return ret;
 }
 
@@ -363,7 +363,7 @@ static int get_current_power_limit(struct powercap_zone *power_zone, int cid,
 	int ret = 0;
 	int id;
 
-	cpus_read_lock();
+	get_online_cpus();
 	rd = power_zone_to_rapl_domain(power_zone);
 	id = contraint_to_pl(rd, cid);
 	if (id < 0) {
@@ -382,7 +382,7 @@ static int get_current_power_limit(struct powercap_zone *power_zone, int cid,
 		prim = POWER_LIMIT4;
 		break;
 	default:
-		cpus_read_unlock();
+		put_online_cpus();
 		return -EINVAL;
 	}
 	if (rapl_read_data_raw(rd, prim, true, &val))
@@ -391,7 +391,7 @@ static int get_current_power_limit(struct powercap_zone *power_zone, int cid,
 		*data = val;
 
 get_exit:
-	cpus_read_unlock();
+	put_online_cpus();
 
 	return ret;
 }
@@ -403,7 +403,7 @@ static int set_time_window(struct powercap_zone *power_zone, int cid,
 	int ret = 0;
 	int id;
 
-	cpus_read_lock();
+	get_online_cpus();
 	rd = power_zone_to_rapl_domain(power_zone);
 	id = contraint_to_pl(rd, cid);
 	if (id < 0) {
@@ -423,7 +423,7 @@ static int set_time_window(struct powercap_zone *power_zone, int cid,
 	}
 
 set_time_exit:
-	cpus_read_unlock();
+	put_online_cpus();
 	return ret;
 }
 
@@ -435,7 +435,7 @@ static int get_time_window(struct powercap_zone *power_zone, int cid,
 	int ret = 0;
 	int id;
 
-	cpus_read_lock();
+	get_online_cpus();
 	rd = power_zone_to_rapl_domain(power_zone);
 	id = contraint_to_pl(rd, cid);
 	if (id < 0) {
@@ -458,14 +458,14 @@ static int get_time_window(struct powercap_zone *power_zone, int cid,
 		val = 0;
 		break;
 	default:
-		cpus_read_unlock();
+		put_online_cpus();
 		return -EINVAL;
 	}
 	if (!ret)
 		*data = val;
 
 get_time_exit:
-	cpus_read_unlock();
+	put_online_cpus();
 
 	return ret;
 }
@@ -491,7 +491,7 @@ static int get_max_power(struct powercap_zone *power_zone, int id, u64 *data)
 	int prim;
 	int ret = 0;
 
-	cpus_read_lock();
+	get_online_cpus();
 	rd = power_zone_to_rapl_domain(power_zone);
 	switch (rd->rpl[id].prim_id) {
 	case PL1_ENABLE:
@@ -504,7 +504,7 @@ static int get_max_power(struct powercap_zone *power_zone, int id, u64 *data)
 		prim = MAX_POWER;
 		break;
 	default:
-		cpus_read_unlock();
+		put_online_cpus();
 		return -EINVAL;
 	}
 	if (rapl_read_data_raw(rd, prim, true, &val))
@@ -516,7 +516,7 @@ static int get_max_power(struct powercap_zone *power_zone, int id, u64 *data)
 	if (rd->rpl[id].prim_id == PL4_ENABLE)
 		*data = *data * 2;
 
-	cpus_read_unlock();
+	put_online_cpus();
 
 	return ret;
 }
@@ -547,7 +547,7 @@ static void rapl_init_domains(struct rapl_package *rp)
 
 		if (i == RAPL_DOMAIN_PLATFORM && rp->id > 0) {
 			snprintf(rd->name, RAPL_DOMAIN_NAME_LENGTH, "psys-%d",
-				topology_physical_package_id(rp->lead_cpu));
+				cpu_data(rp->lead_cpu).phys_proc_id);
 		} else
 			snprintf(rd->name, RAPL_DOMAIN_NAME_LENGTH, "%s",
 				rapl_domain_names[i]);
@@ -1011,10 +1011,6 @@ static const struct rapl_defaults rapl_defaults_cht = {
 	.compute_time_window = rapl_compute_time_window_atom,
 };
 
-static const struct rapl_defaults rapl_defaults_amd = {
-	.check_unit = rapl_check_unit_core,
-};
-
 static const struct x86_cpu_id rapl_ids[] __initconst = {
 	X86_MATCH_INTEL_FAM6_MODEL(SANDYBRIDGE,		&rapl_defaults_core),
 	X86_MATCH_INTEL_FAM6_MODEL(SANDYBRIDGE_X,	&rapl_defaults_core),
@@ -1049,7 +1045,6 @@ static const struct x86_cpu_id rapl_ids[] __initconst = {
 	X86_MATCH_INTEL_FAM6_MODEL(TIGERLAKE,		&rapl_defaults_core),
 	X86_MATCH_INTEL_FAM6_MODEL(ROCKETLAKE,		&rapl_defaults_core),
 	X86_MATCH_INTEL_FAM6_MODEL(ALDERLAKE,		&rapl_defaults_core),
-	X86_MATCH_INTEL_FAM6_MODEL(ALDERLAKE_L,		&rapl_defaults_core),
 	X86_MATCH_INTEL_FAM6_MODEL(SAPPHIRERAPIDS_X,	&rapl_defaults_spr_server),
 	X86_MATCH_INTEL_FAM6_MODEL(LAKEFIELD,		&rapl_defaults_core),
 
@@ -1066,10 +1061,6 @@ static const struct x86_cpu_id rapl_ids[] __initconst = {
 
 	X86_MATCH_INTEL_FAM6_MODEL(XEON_PHI_KNL,	&rapl_defaults_hsw_server),
 	X86_MATCH_INTEL_FAM6_MODEL(XEON_PHI_KNM,	&rapl_defaults_hsw_server),
-
-	X86_MATCH_VENDOR_FAM(AMD, 0x17, &rapl_defaults_amd),
-	X86_MATCH_VENDOR_FAM(AMD, 0x19, &rapl_defaults_amd),
-	X86_MATCH_VENDOR_FAM(HYGON, 0x18, &rapl_defaults_amd),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, rapl_ids);
@@ -1311,6 +1302,7 @@ struct rapl_package *rapl_add_package(int cpu, struct rapl_if_priv *priv)
 {
 	int id = topology_logical_die_id(cpu);
 	struct rapl_package *rp;
+	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	int ret;
 
 	if (!rapl_defaults)
@@ -1327,11 +1319,10 @@ struct rapl_package *rapl_add_package(int cpu, struct rapl_if_priv *priv)
 
 	if (topology_max_die_per_package() > 1)
 		snprintf(rp->name, PACKAGE_DOMAIN_NAME_LENGTH,
-			 "package-%d-die-%d",
-			 topology_physical_package_id(cpu), topology_die_id(cpu));
+			 "package-%d-die-%d", c->phys_proc_id, c->cpu_die_id);
 	else
 		snprintf(rp->name, PACKAGE_DOMAIN_NAME_LENGTH, "package-%d",
-			 topology_physical_package_id(cpu));
+			 c->phys_proc_id);
 
 	/* check if the package contains valid domains */
 	if (rapl_detect_domains(rp, cpu) || rapl_defaults->check_unit(rp, cpu)) {
@@ -1358,7 +1349,7 @@ static void power_limit_state_save(void)
 	struct rapl_domain *rd;
 	int nr_pl, ret, i;
 
-	cpus_read_lock();
+	get_online_cpus();
 	list_for_each_entry(rp, &rapl_packages, plist) {
 		if (!rp->power_zone)
 			continue;
@@ -1390,7 +1381,7 @@ static void power_limit_state_save(void)
 			}
 		}
 	}
-	cpus_read_unlock();
+	put_online_cpus();
 }
 
 static void power_limit_state_restore(void)
@@ -1399,7 +1390,7 @@ static void power_limit_state_restore(void)
 	struct rapl_domain *rd;
 	int nr_pl, i;
 
-	cpus_read_lock();
+	get_online_cpus();
 	list_for_each_entry(rp, &rapl_packages, plist) {
 		if (!rp->power_zone)
 			continue;
@@ -1425,7 +1416,7 @@ static void power_limit_state_restore(void)
 			}
 		}
 	}
-	cpus_read_unlock();
+	put_online_cpus();
 }
 
 static int rapl_pm_callback(struct notifier_block *nb,

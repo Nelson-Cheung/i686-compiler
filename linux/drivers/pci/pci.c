@@ -31,7 +31,6 @@
 #include <linux/vmalloc.h>
 #include <asm/dma.h>
 #include <linux/aer.h>
-#include <linux/bitfield.h>
 #include "pci.h"
 
 DEFINE_MUTEX(pci_slot_mutex);
@@ -71,11 +70,6 @@ static void pci_dev_d3_sleep(struct pci_dev *dev)
 
 	if (delay)
 		msleep(delay);
-}
-
-bool pci_reset_supported(struct pci_dev *dev)
-{
-	return dev->reset_methods[0] != 0;
 }
 
 #ifdef CONFIG_PCI_DOMAINS
@@ -212,36 +206,32 @@ int pci_status_get_and_clear_errors(struct pci_dev *pdev)
 EXPORT_SYMBOL_GPL(pci_status_get_and_clear_errors);
 
 #ifdef CONFIG_HAS_IOMEM
-static void __iomem *__pci_ioremap_resource(struct pci_dev *pdev, int bar,
-					    bool write_combine)
+void __iomem *pci_ioremap_bar(struct pci_dev *pdev, int bar)
 {
 	struct resource *res = &pdev->resource[bar];
-	resource_size_t start = res->start;
-	resource_size_t size = resource_size(res);
 
 	/*
 	 * Make sure the BAR is actually a memory resource, not an IO resource
 	 */
 	if (res->flags & IORESOURCE_UNSET || !(res->flags & IORESOURCE_MEM)) {
-		pci_err(pdev, "can't ioremap BAR %d: %pR\n", bar, res);
+		pci_warn(pdev, "can't ioremap BAR %d: %pR\n", bar, res);
 		return NULL;
 	}
-
-	if (write_combine)
-		return ioremap_wc(start, size);
-
-	return ioremap(start, size);
-}
-
-void __iomem *pci_ioremap_bar(struct pci_dev *pdev, int bar)
-{
-	return __pci_ioremap_resource(pdev, bar, false);
+	return ioremap(res->start, resource_size(res));
 }
 EXPORT_SYMBOL_GPL(pci_ioremap_bar);
 
 void __iomem *pci_ioremap_wc_bar(struct pci_dev *pdev, int bar)
 {
-	return __pci_ioremap_resource(pdev, bar, true);
+	/*
+	 * Make sure the BAR is actually a memory resource, not an IO resource
+	 */
+	if (!(pci_resource_flags(pdev, bar) & IORESOURCE_MEM)) {
+		WARN_ON(1);
+		return NULL;
+	}
+	return ioremap_wc(pci_resource_start(pdev, bar),
+			  pci_resource_len(pdev, bar));
 }
 EXPORT_SYMBOL_GPL(pci_ioremap_wc_bar);
 #endif
@@ -275,7 +265,7 @@ static int pci_dev_str_match_path(struct pci_dev *dev, const char *path,
 
 	*endptr = strchrnul(path, ';');
 
-	wpath = kmemdup_nul(path, *endptr - path, GFP_ATOMIC);
+	wpath = kmemdup_nul(path, *endptr - path, GFP_KERNEL);
 	if (!wpath)
 		return -ENOMEM;
 
@@ -409,8 +399,8 @@ found:
 	return 1;
 }
 
-static u8 __pci_find_next_cap_ttl(struct pci_bus *bus, unsigned int devfn,
-				  u8 pos, int cap, int *ttl)
+static int __pci_find_next_cap_ttl(struct pci_bus *bus, unsigned int devfn,
+				   u8 pos, int cap, int *ttl)
 {
 	u8 id;
 	u16 ent;
@@ -433,22 +423,22 @@ static u8 __pci_find_next_cap_ttl(struct pci_bus *bus, unsigned int devfn,
 	return 0;
 }
 
-static u8 __pci_find_next_cap(struct pci_bus *bus, unsigned int devfn,
-			      u8 pos, int cap)
+static int __pci_find_next_cap(struct pci_bus *bus, unsigned int devfn,
+			       u8 pos, int cap)
 {
 	int ttl = PCI_FIND_CAP_TTL;
 
 	return __pci_find_next_cap_ttl(bus, devfn, pos, cap, &ttl);
 }
 
-u8 pci_find_next_capability(struct pci_dev *dev, u8 pos, int cap)
+int pci_find_next_capability(struct pci_dev *dev, u8 pos, int cap)
 {
 	return __pci_find_next_cap(dev->bus, dev->devfn,
 				   pos + PCI_CAP_LIST_NEXT, cap);
 }
 EXPORT_SYMBOL_GPL(pci_find_next_capability);
 
-static u8 __pci_bus_find_cap_start(struct pci_bus *bus,
+static int __pci_bus_find_cap_start(struct pci_bus *bus,
 				    unsigned int devfn, u8 hdr_type)
 {
 	u16 status;
@@ -487,9 +477,9 @@ static u8 __pci_bus_find_cap_start(struct pci_bus *bus,
  *  %PCI_CAP_ID_PCIX         PCI-X
  *  %PCI_CAP_ID_EXP          PCI Express
  */
-u8 pci_find_capability(struct pci_dev *dev, int cap)
+int pci_find_capability(struct pci_dev *dev, int cap)
 {
-	u8 pos;
+	int pos;
 
 	pos = __pci_bus_find_cap_start(dev->bus, dev->devfn, dev->hdr_type);
 	if (pos)
@@ -512,9 +502,10 @@ EXPORT_SYMBOL(pci_find_capability);
  * device's PCI configuration space or 0 in case the device does not
  * support it.
  */
-u8 pci_bus_find_capability(struct pci_bus *bus, unsigned int devfn, int cap)
+int pci_bus_find_capability(struct pci_bus *bus, unsigned int devfn, int cap)
 {
-	u8 hdr_type, pos;
+	int pos;
+	u8 hdr_type;
 
 	pci_bus_read_config_byte(bus, devfn, PCI_HEADER_TYPE, &hdr_type);
 
@@ -537,11 +528,11 @@ EXPORT_SYMBOL(pci_bus_find_capability);
  * not support it.  Some capabilities can occur several times, e.g., the
  * vendor-specific capability, and this provides a way to find them all.
  */
-u16 pci_find_next_ext_capability(struct pci_dev *dev, u16 start, int cap)
+int pci_find_next_ext_capability(struct pci_dev *dev, int start, int cap)
 {
 	u32 header;
 	int ttl;
-	u16 pos = PCI_CFG_SPACE_SIZE;
+	int pos = PCI_CFG_SPACE_SIZE;
 
 	/* minimum 8 bytes per capability */
 	ttl = (PCI_CFG_SPACE_EXP_SIZE - PCI_CFG_SPACE_SIZE) / 8;
@@ -592,7 +583,7 @@ EXPORT_SYMBOL_GPL(pci_find_next_ext_capability);
  *  %PCI_EXT_CAP_ID_DSN		Device Serial Number
  *  %PCI_EXT_CAP_ID_PWR		Power Budgeting
  */
-u16 pci_find_ext_capability(struct pci_dev *dev, int cap)
+int pci_find_ext_capability(struct pci_dev *dev, int cap)
 {
 	return pci_find_next_ext_capability(dev, 0, cap);
 }
@@ -632,7 +623,7 @@ u64 pci_get_dsn(struct pci_dev *dev)
 }
 EXPORT_SYMBOL_GPL(pci_get_dsn);
 
-static u8 __pci_find_next_ht_cap(struct pci_dev *dev, u8 pos, int ht_cap)
+static int __pci_find_next_ht_cap(struct pci_dev *dev, int pos, int ht_cap)
 {
 	int rc, ttl = PCI_FIND_CAP_TTL;
 	u8 cap, mask;
@@ -659,12 +650,11 @@ static u8 __pci_find_next_ht_cap(struct pci_dev *dev, u8 pos, int ht_cap)
 
 	return 0;
 }
-
 /**
- * pci_find_next_ht_capability - query a device's HyperTransport capabilities
+ * pci_find_next_ht_capability - query a device's Hypertransport capabilities
  * @dev: PCI device to query
  * @pos: Position from which to continue searching
- * @ht_cap: HyperTransport capability code
+ * @ht_cap: Hypertransport capability code
  *
  * To be used in conjunction with pci_find_ht_capability() to search for
  * all capabilities matching @ht_cap. @pos should always be a value returned
@@ -673,26 +663,26 @@ static u8 __pci_find_next_ht_cap(struct pci_dev *dev, u8 pos, int ht_cap)
  * NB. To be 100% safe against broken PCI devices, the caller should take
  * steps to avoid an infinite loop.
  */
-u8 pci_find_next_ht_capability(struct pci_dev *dev, u8 pos, int ht_cap)
+int pci_find_next_ht_capability(struct pci_dev *dev, int pos, int ht_cap)
 {
 	return __pci_find_next_ht_cap(dev, pos + PCI_CAP_LIST_NEXT, ht_cap);
 }
 EXPORT_SYMBOL_GPL(pci_find_next_ht_capability);
 
 /**
- * pci_find_ht_capability - query a device's HyperTransport capabilities
+ * pci_find_ht_capability - query a device's Hypertransport capabilities
  * @dev: PCI device to query
- * @ht_cap: HyperTransport capability code
+ * @ht_cap: Hypertransport capability code
  *
- * Tell if a device supports a given HyperTransport capability.
+ * Tell if a device supports a given Hypertransport capability.
  * Returns an address within the device's PCI configuration space
  * or 0 in case the device does not support the request capability.
  * The address points to the PCI capability, of type PCI_CAP_ID_HT,
- * which has a HyperTransport capability matching @ht_cap.
+ * which has a Hypertransport capability matching @ht_cap.
  */
-u8 pci_find_ht_capability(struct pci_dev *dev, int ht_cap)
+int pci_find_ht_capability(struct pci_dev *dev, int ht_cap)
 {
-	u8 pos;
+	int pos;
 
 	pos = __pci_bus_find_cap_start(dev->bus, dev->devfn, dev->hdr_type);
 	if (pos)
@@ -701,36 +691,6 @@ u8 pci_find_ht_capability(struct pci_dev *dev, int ht_cap)
 	return pos;
 }
 EXPORT_SYMBOL_GPL(pci_find_ht_capability);
-
-/**
- * pci_find_vsec_capability - Find a vendor-specific extended capability
- * @dev: PCI device to query
- * @vendor: Vendor ID for which capability is defined
- * @cap: Vendor-specific capability ID
- *
- * If @dev has Vendor ID @vendor, search for a VSEC capability with
- * VSEC ID @cap. If found, return the capability offset in
- * config space; otherwise return 0.
- */
-u16 pci_find_vsec_capability(struct pci_dev *dev, u16 vendor, int cap)
-{
-	u16 vsec = 0;
-	u32 header;
-
-	if (vendor != dev->vendor)
-		return 0;
-
-	while ((vsec = pci_find_next_ext_capability(dev, vsec,
-						     PCI_EXT_CAP_ID_VNDR))) {
-		if (pci_read_config_dword(dev, vsec + PCI_VNDR_HEADER,
-					  &header) == PCIBIOS_SUCCESSFUL &&
-		    PCI_VNDR_HEADER_ID(header) == cap)
-			return vsec;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pci_find_vsec_capability);
 
 /**
  * pci_find_parent_resource - return resource region of parent bus of given
@@ -925,8 +885,8 @@ static void pci_std_enable_acs(struct pci_dev *dev)
 	/* Upstream Forwarding */
 	ctrl |= (cap & PCI_ACS_UF);
 
-	/* Enable Translation Blocking for external devices and noats */
-	if (pci_ats_disabled() || dev->external_facing || dev->untrusted)
+	/* Enable Translation Blocking for external devices */
+	if (dev->external_facing || dev->untrusted)
 		ctrl |= (cap & PCI_ACS_TB);
 
 	pci_write_config_word(dev, pos + PCI_ACS_CTRL, ctrl);
@@ -1214,20 +1174,26 @@ int pci_platform_power_transition(struct pci_dev *dev, pci_power_t state)
 }
 EXPORT_SYMBOL_GPL(pci_platform_power_transition);
 
-static int pci_resume_one(struct pci_dev *pci_dev, void *ign)
+/**
+ * pci_wakeup - Wake up a PCI device
+ * @pci_dev: Device to handle.
+ * @ign: ignored parameter
+ */
+static int pci_wakeup(struct pci_dev *pci_dev, void *ign)
 {
+	pci_wakeup_event(pci_dev);
 	pm_request_resume(&pci_dev->dev);
 	return 0;
 }
 
 /**
- * pci_resume_bus - Walk given bus and runtime resume devices on it
+ * pci_wakeup_bus - Walk given bus and wake up devices on it
  * @bus: Top bus of the subtree to walk.
  */
-void pci_resume_bus(struct pci_bus *bus)
+void pci_wakeup_bus(struct pci_bus *bus)
 {
 	if (bus)
-		pci_walk_bus(bus, pci_resume_one, NULL);
+		pci_walk_bus(bus, pci_wakeup, NULL);
 }
 
 static int pci_dev_wait(struct pci_dev *dev, char *reset_type, int timeout)
@@ -1290,7 +1256,7 @@ int pci_power_up(struct pci_dev *dev)
 		 * may be powered on into D0uninitialized state, resume them to
 		 * give them a chance to suspend again
 		 */
-		pci_resume_bus(dev->subordinate);
+		pci_wakeup_bus(dev->subordinate);
 	}
 
 	return pci_raw_set_power_state(dev, PCI_D0);
@@ -1600,7 +1566,6 @@ int pci_save_state(struct pci_dev *dev)
 	pci_save_ltr_state(dev);
 	pci_save_dpc_state(dev);
 	pci_save_aer_state(dev);
-	pci_save_ptm_state(dev);
 	return pci_save_vc_state(dev);
 }
 EXPORT_SYMBOL(pci_save_state);
@@ -1683,7 +1648,7 @@ static void pci_restore_rebar_state(struct pci_dev *pdev)
 		pci_read_config_dword(pdev, pos + PCI_REBAR_CTRL, &ctrl);
 		bar_idx = ctrl & PCI_REBAR_CTRL_BAR_IDX;
 		res = pdev->resource + bar_idx;
-		size = pci_rebar_bytes_to_size(resource_size(res));
+		size = ilog2(resource_size(res)) - 20;
 		ctrl &= ~PCI_REBAR_CTRL_BAR_SIZE;
 		ctrl |= size << PCI_REBAR_CTRL_BAR_SHIFT;
 		pci_write_config_dword(pdev, pos + PCI_REBAR_CTRL, ctrl);
@@ -1712,7 +1677,6 @@ void pci_restore_state(struct pci_dev *dev)
 	pci_restore_vc_state(dev);
 	pci_restore_rebar_state(dev);
 	pci_restore_dpc_state(dev);
-	pci_restore_ptm_state(dev);
 
 	pci_aer_clear_status(dev);
 	pci_restore_aer_state(dev);
@@ -1916,7 +1880,11 @@ static int pci_enable_device_flags(struct pci_dev *dev, unsigned long flags)
 	 * so that things like MSI message writing will behave as expected
 	 * (e.g. if the device really is in D0 at enable time).
 	 */
-	pci_update_current_state(dev, dev->current_state);
+	if (dev->pm_cap) {
+		u16 pmcsr;
+		pci_read_config_word(dev, dev->pm_cap + PCI_PM_CTRL, &pmcsr);
+		dev->current_state = (pmcsr & PCI_PM_CTRL_STATE_MASK);
+	}
 
 	if (atomic_inc_return(&dev->enable_cnt) > 1)
 		return 0;		/* already enabled */
@@ -2501,14 +2469,7 @@ static int __pci_enable_wake(struct pci_dev *dev, pci_power_t state, bool enable
 	if (enable) {
 		int error;
 
-		/*
-		 * Enable PME signaling if the device can signal PME from
-		 * D3cold regardless of whether or not it can signal PME from
-		 * the current target state, because that will allow it to
-		 * signal PME when the hierarchy above it goes into D3cold and
-		 * the device itself ends up in D3cold as a result of that.
-		 */
-		if (pci_pme_capable(dev, state) || pci_pme_capable(dev, PCI_D3cold))
+		if (pci_pme_capable(dev, state))
 			pci_pme_active(dev, true);
 		else
 			ret = 1;
@@ -2612,20 +2573,16 @@ static pci_power_t pci_target_state(struct pci_dev *dev, bool wakeup)
 	if (dev->current_state == PCI_D3cold)
 		target_state = PCI_D3cold;
 
-	if (wakeup && dev->pme_support) {
-		pci_power_t state = target_state;
-
+	if (wakeup) {
 		/*
 		 * Find the deepest state from which the device can generate
 		 * PME#.
 		 */
-		while (state && !(dev->pme_support & (1 << state)))
-			state--;
-
-		if (state)
-			return state;
-		else if (dev->pme_support & 1)
-			return PCI_D0;
+		if (dev->pme_support) {
+			while (target_state
+			      && !(dev->pme_support & (1 << target_state)))
+				target_state--;
+		}
 	}
 
 	return target_state;
@@ -2649,24 +2606,12 @@ int pci_prepare_to_sleep(struct pci_dev *dev)
 	if (target_state == PCI_POWER_ERROR)
 		return -EIO;
 
-	/*
-	 * There are systems (for example, Intel mobile chips since Coffee
-	 * Lake) where the power drawn while suspended can be significantly
-	 * reduced by disabling PTM on PCIe root ports as this allows the
-	 * port to enter a lower-power PM state and the SoC to reach a
-	 * lower-power idle state as a whole.
-	 */
-	if (pci_pcie_type(dev) == PCI_EXP_TYPE_ROOT_PORT)
-		pci_disable_ptm(dev);
-
 	pci_enable_wake(dev, target_state, wakeup);
 
 	error = pci_set_power_state(dev, target_state);
 
-	if (error) {
+	if (error)
 		pci_enable_wake(dev, target_state, false);
-		pci_restore_ptm_state(dev);
-	}
 
 	return error;
 }
@@ -2704,23 +2649,12 @@ int pci_finish_runtime_suspend(struct pci_dev *dev)
 
 	dev->runtime_d3cold = target_state == PCI_D3cold;
 
-	/*
-	 * There are systems (for example, Intel mobile chips since Coffee
-	 * Lake) where the power drawn while suspended can be significantly
-	 * reduced by disabling PTM on PCIe root ports as this allows the
-	 * port to enter a lower-power PM state and the SoC to reach a
-	 * lower-power idle state as a whole.
-	 */
-	if (pci_pcie_type(dev) == PCI_EXP_TYPE_ROOT_PORT)
-		pci_disable_ptm(dev);
-
 	__pci_enable_wake(dev, target_state, pci_dev_run_wake(dev));
 
 	error = pci_set_power_state(dev, target_state);
 
 	if (error) {
 		pci_enable_wake(dev, target_state, false);
-		pci_restore_ptm_state(dev);
 		dev->runtime_d3cold = false;
 	}
 
@@ -3546,7 +3480,7 @@ bool pci_acs_enabled(struct pci_dev *pdev, u16 acs_flags)
 }
 
 /**
- * pci_acs_path_enabled - test ACS flags from start to end in a hierarchy
+ * pci_acs_path_enable - test ACS flags from start to end in a hierarchy
  * @start: starting downstream device
  * @end: ending upstream device or NULL to search to the root bus
  * @acs_flags: required flags
@@ -3643,16 +3577,8 @@ u32 pci_rebar_get_possible_sizes(struct pci_dev *pdev, int bar)
 		return 0;
 
 	pci_read_config_dword(pdev, pos + PCI_REBAR_CAP, &cap);
-	cap &= PCI_REBAR_CAP_SIZES;
-
-	/* Sapphire RX 5600 XT Pulse has an invalid cap dword for BAR 0 */
-	if (pdev->vendor == PCI_VENDOR_ID_ATI && pdev->device == 0x731f &&
-	    bar == 0 && cap == 0x7000)
-		cap = 0x3f000;
-
-	return cap >> 4;
+	return (cap & PCI_REBAR_CAP_SIZES) >> 4;
 }
-EXPORT_SYMBOL(pci_rebar_get_possible_sizes);
 
 /**
  * pci_rebar_get_current_size - get the current size of a BAR
@@ -4077,10 +4003,6 @@ int pci_register_io_range(struct fwnode_handle *fwnode, phys_addr_t addr,
 	ret = logic_pio_register_range(range);
 	if (ret)
 		kfree(range);
-
-	/* Ignore duplicates due to deferred probing */
-	if (ret == -EEXIST)
-		ret = 0;
 #endif
 
 	return ret;
@@ -4099,7 +4021,6 @@ phys_addr_t pci_pio_to_address(unsigned long pio)
 
 	return address;
 }
-EXPORT_SYMBOL_GPL(pci_pio_to_address);
 
 unsigned long __weak pci_address_to_pio(phys_addr_t address)
 {
@@ -4160,7 +4081,7 @@ void pci_unmap_iospace(struct resource *res)
 #if defined(PCI_IOBASE) && defined(CONFIG_MMU)
 	unsigned long vaddr = (unsigned long)PCI_IOBASE + res->start;
 
-	vunmap_range(vaddr, vaddr + resource_size(res));
+	unmap_kernel_range(vaddr, resource_size(res));
 #endif
 }
 EXPORT_SYMBOL(pci_unmap_iospace);
@@ -4267,14 +4188,7 @@ void __iomem *devm_pci_remap_cfg_resource(struct device *dev,
 	}
 
 	size = resource_size(res);
-
-	if (res->name)
-		name = devm_kasprintf(dev, GFP_KERNEL, "%s %s", dev_name(dev),
-				      res->name);
-	else
-		name = devm_kstrdup(dev, dev_name(dev), GFP_KERNEL);
-	if (!name)
-		return IOMEM_ERR_PTR(-ENOMEM);
+	name = res->name ?: dev_name(dev);
 
 	if (!devm_request_mem_region(dev, res->start, size, name)) {
 		dev_err(dev, "can't request region for resource %pR\n", res);
@@ -4403,7 +4317,7 @@ int pci_set_cacheline_size(struct pci_dev *dev)
 	if (cacheline_size == pci_cache_line_size)
 		return 0;
 
-	pci_dbg(dev, "cache line size of %d is not supported\n",
+	pci_info(dev, "cache line size of %d is not supported\n",
 		   pci_cache_line_size << 2);
 
 	return -EINVAL;
@@ -4500,23 +4414,6 @@ void pci_clear_mwi(struct pci_dev *dev)
 #endif
 }
 EXPORT_SYMBOL(pci_clear_mwi);
-
-/**
- * pci_disable_parity - disable parity checking for device
- * @dev: the PCI device to operate on
- *
- * Disable parity checking for device @dev
- */
-void pci_disable_parity(struct pci_dev *dev)
-{
-	u16 cmd;
-
-	pci_read_config_word(dev, PCI_COMMAND, &cmd);
-	if (cmd & PCI_COMMAND_PARITY) {
-		cmd &= ~PCI_COMMAND_PARITY;
-		pci_write_config_word(dev, PCI_COMMAND, cmd);
-	}
-}
 
 /**
  * pci_intx - enables/disables PCI INTx for device dev
@@ -4639,11 +4536,31 @@ int pci_wait_for_pending_transaction(struct pci_dev *dev)
 EXPORT_SYMBOL(pci_wait_for_pending_transaction);
 
 /**
+ * pcie_has_flr - check if a device supports function level resets
+ * @dev: device to check
+ *
+ * Returns true if the device advertises support for PCIe function level
+ * resets.
+ */
+bool pcie_has_flr(struct pci_dev *dev)
+{
+	u32 cap;
+
+	if (dev->dev_flags & PCI_DEV_FLAGS_NO_FLR_RESET)
+		return false;
+
+	pcie_capability_read_dword(dev, PCI_EXP_DEVCAP, &cap);
+	return cap & PCI_EXP_DEVCAP_FLR;
+}
+EXPORT_SYMBOL_GPL(pcie_has_flr);
+
+/**
  * pcie_flr - initiate a PCIe function level reset
  * @dev: device to reset
  *
- * Initiate a function level reset unconditionally on @dev without
- * checking any flags and DEVCAP
+ * Initiate a function level reset on @dev.  The caller should ensure the
+ * device supports FLR before calling this function, e.g. by using the
+ * pcie_has_flr() helper.
  */
 int pcie_flr(struct pci_dev *dev)
 {
@@ -4666,29 +4583,7 @@ int pcie_flr(struct pci_dev *dev)
 }
 EXPORT_SYMBOL_GPL(pcie_flr);
 
-/**
- * pcie_reset_flr - initiate a PCIe function level reset
- * @dev: device to reset
- * @probe: if true, return 0 if device can be reset this way
- *
- * Initiate a function level reset on @dev.
- */
-int pcie_reset_flr(struct pci_dev *dev, bool probe)
-{
-	if (dev->dev_flags & PCI_DEV_FLAGS_NO_FLR_RESET)
-		return -ENOTTY;
-
-	if (!(dev->devcap & PCI_EXP_DEVCAP_FLR))
-		return -ENOTTY;
-
-	if (probe)
-		return 0;
-
-	return pcie_flr(dev);
-}
-EXPORT_SYMBOL_GPL(pcie_reset_flr);
-
-static int pci_af_flr(struct pci_dev *dev, bool probe)
+static int pci_af_flr(struct pci_dev *dev, int probe)
 {
 	int pos;
 	u8 cap;
@@ -4735,7 +4630,7 @@ static int pci_af_flr(struct pci_dev *dev, bool probe)
 /**
  * pci_pm_reset - Put device into PCI_D3 and back into PCI_D0.
  * @dev: Device to reset.
- * @probe: if true, return 0 if the device can be reset this way.
+ * @probe: If set, only check if the device can be reset this way.
  *
  * If @dev supports native PCI PM and its PCI_PM_CTRL_NO_SOFT_RESET flag is
  * unset, it will be reinitialized internally when going from PCI_D3hot to
@@ -4747,7 +4642,7 @@ static int pci_af_flr(struct pci_dev *dev, bool probe)
  * by default (i.e. unless the @dev's d3hot_delay field has a different value).
  * Moreover, only devices in D0 can be reset by this function.
  */
-static int pci_pm_reset(struct pci_dev *dev, bool probe)
+static int pci_pm_reset(struct pci_dev *dev, int probe)
 {
 	u16 csr;
 
@@ -5007,7 +4902,7 @@ int pci_bridge_secondary_bus_reset(struct pci_dev *dev)
 }
 EXPORT_SYMBOL_GPL(pci_bridge_secondary_bus_reset);
 
-static int pci_parent_bus_reset(struct pci_dev *dev, bool probe)
+static int pci_parent_bus_reset(struct pci_dev *dev, int probe)
 {
 	struct pci_dev *pdev;
 
@@ -5025,7 +4920,7 @@ static int pci_parent_bus_reset(struct pci_dev *dev, bool probe)
 	return pci_bridge_secondary_bus_reset(dev->bus->self);
 }
 
-static int pci_reset_hotplug_slot(struct hotplug_slot *hotplug, bool probe)
+static int pci_reset_hotplug_slot(struct hotplug_slot *hotplug, int probe)
 {
 	int rc = -ENOTTY;
 
@@ -5040,23 +4935,13 @@ static int pci_reset_hotplug_slot(struct hotplug_slot *hotplug, bool probe)
 	return rc;
 }
 
-static int pci_dev_reset_slot_function(struct pci_dev *dev, bool probe)
+static int pci_dev_reset_slot_function(struct pci_dev *dev, int probe)
 {
 	if (dev->multifunction || dev->subordinate || !dev->slot ||
 	    dev->dev_flags & PCI_DEV_FLAGS_NO_BUS_RESET)
 		return -ENOTTY;
 
 	return pci_reset_hotplug_slot(dev->slot->hotplug, probe);
-}
-
-static int pci_reset_bus_function(struct pci_dev *dev, bool probe)
-{
-	int rc;
-
-	rc = pci_dev_reset_slot_function(dev, probe);
-	if (rc != -ENOTTY)
-		return rc;
-	return pci_parent_bus_reset(dev, probe);
 }
 
 static void pci_dev_lock(struct pci_dev *dev)
@@ -5067,7 +4952,7 @@ static void pci_dev_lock(struct pci_dev *dev)
 }
 
 /* Return 1 on successful lock, 0 on contention */
-int pci_dev_trylock(struct pci_dev *dev)
+static int pci_dev_trylock(struct pci_dev *dev)
 {
 	if (pci_cfg_access_trylock(dev)) {
 		if (device_trylock(&dev->dev))
@@ -5077,14 +4962,12 @@ int pci_dev_trylock(struct pci_dev *dev)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(pci_dev_trylock);
 
-void pci_dev_unlock(struct pci_dev *dev)
+static void pci_dev_unlock(struct pci_dev *dev)
 {
 	device_unlock(&dev->dev);
 	pci_cfg_access_unlock(dev);
 }
-EXPORT_SYMBOL_GPL(pci_dev_unlock);
 
 static void pci_dev_save_and_disable(struct pci_dev *dev)
 {
@@ -5133,139 +5016,6 @@ static void pci_dev_restore(struct pci_dev *dev)
 		err_handler->reset_done(dev);
 }
 
-/* dev->reset_methods[] is a 0-terminated list of indices into this array */
-static const struct pci_reset_fn_method pci_reset_fn_methods[] = {
-	{ },
-	{ pci_dev_specific_reset, .name = "device_specific" },
-	{ pci_dev_acpi_reset, .name = "acpi" },
-	{ pcie_reset_flr, .name = "flr" },
-	{ pci_af_flr, .name = "af_flr" },
-	{ pci_pm_reset, .name = "pm" },
-	{ pci_reset_bus_function, .name = "bus" },
-};
-
-static ssize_t reset_method_show(struct device *dev,
-				 struct device_attribute *attr, char *buf)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	ssize_t len = 0;
-	int i, m;
-
-	for (i = 0; i < PCI_NUM_RESET_METHODS; i++) {
-		m = pdev->reset_methods[i];
-		if (!m)
-			break;
-
-		len += sysfs_emit_at(buf, len, "%s%s", len ? " " : "",
-				     pci_reset_fn_methods[m].name);
-	}
-
-	if (len)
-		len += sysfs_emit_at(buf, len, "\n");
-
-	return len;
-}
-
-static int reset_method_lookup(const char *name)
-{
-	int m;
-
-	for (m = 1; m < PCI_NUM_RESET_METHODS; m++) {
-		if (sysfs_streq(name, pci_reset_fn_methods[m].name))
-			return m;
-	}
-
-	return 0;	/* not found */
-}
-
-static ssize_t reset_method_store(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	char *options, *name;
-	int m, n;
-	u8 reset_methods[PCI_NUM_RESET_METHODS] = { 0 };
-
-	if (sysfs_streq(buf, "")) {
-		pdev->reset_methods[0] = 0;
-		pci_warn(pdev, "All device reset methods disabled by user");
-		return count;
-	}
-
-	if (sysfs_streq(buf, "default")) {
-		pci_init_reset_methods(pdev);
-		return count;
-	}
-
-	options = kstrndup(buf, count, GFP_KERNEL);
-	if (!options)
-		return -ENOMEM;
-
-	n = 0;
-	while ((name = strsep(&options, " ")) != NULL) {
-		if (sysfs_streq(name, ""))
-			continue;
-
-		name = strim(name);
-
-		m = reset_method_lookup(name);
-		if (!m) {
-			pci_err(pdev, "Invalid reset method '%s'", name);
-			goto error;
-		}
-
-		if (pci_reset_fn_methods[m].reset_fn(pdev, PCI_RESET_PROBE)) {
-			pci_err(pdev, "Unsupported reset method '%s'", name);
-			goto error;
-		}
-
-		if (n == PCI_NUM_RESET_METHODS - 1) {
-			pci_err(pdev, "Too many reset methods\n");
-			goto error;
-		}
-
-		reset_methods[n++] = m;
-	}
-
-	reset_methods[n] = 0;
-
-	/* Warn if dev-specific supported but not highest priority */
-	if (pci_reset_fn_methods[1].reset_fn(pdev, PCI_RESET_PROBE) == 0 &&
-	    reset_methods[0] != 1)
-		pci_warn(pdev, "Device-specific reset disabled/de-prioritized by user");
-	memcpy(pdev->reset_methods, reset_methods, sizeof(pdev->reset_methods));
-	kfree(options);
-	return count;
-
-error:
-	/* Leave previous methods unchanged */
-	kfree(options);
-	return -EINVAL;
-}
-static DEVICE_ATTR_RW(reset_method);
-
-static struct attribute *pci_dev_reset_method_attrs[] = {
-	&dev_attr_reset_method.attr,
-	NULL,
-};
-
-static umode_t pci_dev_reset_method_attr_is_visible(struct kobject *kobj,
-						    struct attribute *a, int n)
-{
-	struct pci_dev *pdev = to_pci_dev(kobj_to_dev(kobj));
-
-	if (!pci_reset_supported(pdev))
-		return 0;
-
-	return a->mode;
-}
-
-const struct attribute_group pci_dev_reset_method_attr_group = {
-	.attrs = pci_dev_reset_method_attrs,
-	.is_visible = pci_dev_reset_method_attr_is_visible,
-};
-
 /**
  * __pci_reset_function_locked - reset a PCI device function while holding
  * the @dev mutex lock.
@@ -5288,64 +5038,72 @@ const struct attribute_group pci_dev_reset_method_attr_group = {
  */
 int __pci_reset_function_locked(struct pci_dev *dev)
 {
-	int i, m, rc = -ENOTTY;
+	int rc;
 
 	might_sleep();
 
 	/*
-	 * A reset method returns -ENOTTY if it doesn't support this device and
-	 * we should try the next method.
+	 * A reset method returns -ENOTTY if it doesn't support this device
+	 * and we should try the next method.
 	 *
-	 * If it returns 0 (success), we're finished.  If it returns any other
-	 * error, we're also finished: this indicates that further reset
-	 * mechanisms might be broken on the device.
+	 * If it returns 0 (success), we're finished.  If it returns any
+	 * other error, we're also finished: this indicates that further
+	 * reset mechanisms might be broken on the device.
 	 */
-	for (i = 0; i < PCI_NUM_RESET_METHODS; i++) {
-		m = dev->reset_methods[i];
-		if (!m)
-			return -ENOTTY;
-
-		rc = pci_reset_fn_methods[m].reset_fn(dev, PCI_RESET_DO_RESET);
-		if (!rc)
-			return 0;
+	rc = pci_dev_specific_reset(dev, 0);
+	if (rc != -ENOTTY)
+		return rc;
+	if (pcie_has_flr(dev)) {
+		rc = pcie_flr(dev);
 		if (rc != -ENOTTY)
 			return rc;
 	}
-
-	return -ENOTTY;
+	rc = pci_af_flr(dev, 0);
+	if (rc != -ENOTTY)
+		return rc;
+	rc = pci_pm_reset(dev, 0);
+	if (rc != -ENOTTY)
+		return rc;
+	rc = pci_dev_reset_slot_function(dev, 0);
+	if (rc != -ENOTTY)
+		return rc;
+	return pci_parent_bus_reset(dev, 0);
 }
 EXPORT_SYMBOL_GPL(__pci_reset_function_locked);
 
 /**
- * pci_init_reset_methods - check whether device can be safely reset
- * and store supported reset mechanisms.
- * @dev: PCI device to check for reset mechanisms
+ * pci_probe_reset_function - check whether the device can be safely reset
+ * @dev: PCI device to reset
  *
  * Some devices allow an individual function to be reset without affecting
- * other functions in the same device.  The PCI device must be in D0-D3hot
- * state.
+ * other functions in the same device.  The PCI device must be responsive
+ * to PCI config space in order to use this function.
  *
- * Stores reset mechanisms supported by device in reset_methods byte array
- * which is a member of struct pci_dev.
+ * Returns 0 if the device function can be reset or negative if the
+ * device doesn't support resetting a single function.
  */
-void pci_init_reset_methods(struct pci_dev *dev)
+int pci_probe_reset_function(struct pci_dev *dev)
 {
-	int m, i, rc;
-
-	BUILD_BUG_ON(ARRAY_SIZE(pci_reset_fn_methods) != PCI_NUM_RESET_METHODS);
+	int rc;
 
 	might_sleep();
 
-	i = 0;
-	for (m = 1; m < PCI_NUM_RESET_METHODS; m++) {
-		rc = pci_reset_fn_methods[m].reset_fn(dev, PCI_RESET_PROBE);
-		if (!rc)
-			dev->reset_methods[i++] = m;
-		else if (rc != -ENOTTY)
-			break;
-	}
+	rc = pci_dev_specific_reset(dev, 1);
+	if (rc != -ENOTTY)
+		return rc;
+	if (pcie_has_flr(dev))
+		return 0;
+	rc = pci_af_flr(dev, 1);
+	if (rc != -ENOTTY)
+		return rc;
+	rc = pci_pm_reset(dev, 1);
+	if (rc != -ENOTTY)
+		return rc;
+	rc = pci_dev_reset_slot_function(dev, 1);
+	if (rc != -ENOTTY)
+		return rc;
 
-	dev->reset_methods[i] = 0;
+	return pci_parent_bus_reset(dev, 1);
 }
 
 /**
@@ -5368,7 +5126,7 @@ int pci_reset_function(struct pci_dev *dev)
 {
 	int rc;
 
-	if (!pci_reset_supported(dev))
+	if (!dev->reset_fn)
 		return -ENOTTY;
 
 	pci_dev_lock(dev);
@@ -5404,7 +5162,7 @@ int pci_reset_function_locked(struct pci_dev *dev)
 {
 	int rc;
 
-	if (!pci_reset_supported(dev))
+	if (!dev->reset_fn)
 		return -ENOTTY;
 
 	pci_dev_save_and_disable(dev);
@@ -5427,7 +5185,7 @@ int pci_try_reset_function(struct pci_dev *dev)
 {
 	int rc;
 
-	if (!pci_reset_supported(dev))
+	if (!dev->reset_fn)
 		return -ENOTTY;
 
 	if (!pci_dev_trylock(dev))
@@ -5655,7 +5413,7 @@ static void pci_slot_restore_locked(struct pci_slot *slot)
 	}
 }
 
-static int pci_slot_reset(struct pci_slot *slot, bool probe)
+static int pci_slot_reset(struct pci_slot *slot, int probe)
 {
 	int rc;
 
@@ -5683,7 +5441,7 @@ static int pci_slot_reset(struct pci_slot *slot, bool probe)
  */
 int pci_probe_reset_slot(struct pci_slot *slot)
 {
-	return pci_slot_reset(slot, PCI_RESET_PROBE);
+	return pci_slot_reset(slot, 1);
 }
 EXPORT_SYMBOL_GPL(pci_probe_reset_slot);
 
@@ -5706,14 +5464,14 @@ static int __pci_reset_slot(struct pci_slot *slot)
 {
 	int rc;
 
-	rc = pci_slot_reset(slot, PCI_RESET_PROBE);
+	rc = pci_slot_reset(slot, 1);
 	if (rc)
 		return rc;
 
 	if (pci_slot_trylock(slot)) {
 		pci_slot_save_and_disable_locked(slot);
 		might_sleep();
-		rc = pci_reset_hotplug_slot(slot->hotplug, PCI_RESET_DO_RESET);
+		rc = pci_reset_hotplug_slot(slot->hotplug, 0);
 		pci_slot_restore_locked(slot);
 		pci_slot_unlock(slot);
 	} else
@@ -5722,7 +5480,7 @@ static int __pci_reset_slot(struct pci_slot *slot)
 	return rc;
 }
 
-static int pci_bus_reset(struct pci_bus *bus, bool probe)
+static int pci_bus_reset(struct pci_bus *bus, int probe)
 {
 	int ret;
 
@@ -5768,14 +5526,14 @@ int pci_bus_error_reset(struct pci_dev *bridge)
 			goto bus_reset;
 
 	list_for_each_entry(slot, &bus->slots, list)
-		if (pci_slot_reset(slot, PCI_RESET_DO_RESET))
+		if (pci_slot_reset(slot, 0))
 			goto bus_reset;
 
 	mutex_unlock(&pci_slot_mutex);
 	return 0;
 bus_reset:
 	mutex_unlock(&pci_slot_mutex);
-	return pci_bus_reset(bridge->subordinate, PCI_RESET_DO_RESET);
+	return pci_bus_reset(bridge->subordinate, 0);
 }
 
 /**
@@ -5786,7 +5544,7 @@ bus_reset:
  */
 int pci_probe_reset_bus(struct pci_bus *bus)
 {
-	return pci_bus_reset(bus, PCI_RESET_PROBE);
+	return pci_bus_reset(bus, 1);
 }
 EXPORT_SYMBOL_GPL(pci_probe_reset_bus);
 
@@ -5800,7 +5558,7 @@ static int __pci_reset_bus(struct pci_bus *bus)
 {
 	int rc;
 
-	rc = pci_bus_reset(bus, PCI_RESET_PROBE);
+	rc = pci_bus_reset(bus, 1);
 	if (rc)
 		return rc;
 
@@ -6444,21 +6202,19 @@ static resource_size_t pci_specified_resource_alignment(struct pci_dev *dev,
 	while (*p) {
 		count = 0;
 		if (sscanf(p, "%d%n", &align_order, &count) == 1 &&
-		    p[count] == '@') {
+							p[count] == '@') {
 			p += count + 1;
-			if (align_order > 63) {
-				pr_err("PCI: Invalid requested alignment (order %d)\n",
-				       align_order);
-				align_order = PAGE_SHIFT;
-			}
 		} else {
-			align_order = PAGE_SHIFT;
+			align_order = -1;
 		}
 
 		ret = pci_dev_str_match(dev, p, &p);
 		if (ret == 1) {
 			*resize = true;
-			align = 1ULL << align_order;
+			if (align_order == -1)
+				align = PAGE_SIZE;
+			else
+				align = 1 << align_order;
 			break;
 		} else if (ret < 0) {
 			pr_err("PCI: Can't parse resource_alignment parameter: %s\n",
@@ -6605,8 +6361,18 @@ static ssize_t resource_alignment_show(struct bus_type *bus, char *buf)
 
 	spin_lock(&resource_alignment_lock);
 	if (resource_alignment_param)
-		count = sysfs_emit(buf, "%s\n", resource_alignment_param);
+		count = scnprintf(buf, PAGE_SIZE, "%s", resource_alignment_param);
 	spin_unlock(&resource_alignment_lock);
+
+	/*
+	 * When set by the command line, resource_alignment_param will not
+	 * have a trailing line feed, which is ugly. So conditionally add
+	 * it here.
+	 */
+	if (count >= 2 && buf[count - 2] != '\n' && count < PAGE_SIZE - 1) {
+		buf[count - 1] = '\n';
+		buf[count++] = 0;
+	}
 
 	return count;
 }
@@ -6614,31 +6380,15 @@ static ssize_t resource_alignment_show(struct bus_type *bus, char *buf)
 static ssize_t resource_alignment_store(struct bus_type *bus,
 					const char *buf, size_t count)
 {
-	char *param, *old, *end;
+	char *param = kstrndup(buf, count, GFP_KERNEL);
 
-	if (count >= (PAGE_SIZE - 1))
-		return -EINVAL;
-
-	param = kstrndup(buf, count, GFP_KERNEL);
 	if (!param)
 		return -ENOMEM;
 
-	end = strchr(param, '\n');
-	if (end)
-		*end = '\0';
-
 	spin_lock(&resource_alignment_lock);
-	old = resource_alignment_param;
-	if (strlen(param)) {
-		resource_alignment_param = param;
-	} else {
-		kfree(param);
-		resource_alignment_param = NULL;
-	}
+	kfree(resource_alignment_param);
+	resource_alignment_param = param;
 	spin_unlock(&resource_alignment_lock);
-
-	kfree(old);
-
 	return count;
 }
 

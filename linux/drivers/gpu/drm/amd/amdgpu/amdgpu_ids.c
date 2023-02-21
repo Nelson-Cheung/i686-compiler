@@ -112,7 +112,7 @@ void amdgpu_pasid_free_delayed(struct dma_resv *resv,
 	unsigned count;
 	int r;
 
-	r = dma_resv_get_fences(resv, NULL, &count, &fences);
+	r = dma_resv_get_fences_rcu(resv, NULL, &count, &fences);
 	if (r)
 		goto fallback;
 
@@ -156,7 +156,8 @@ fallback:
 	/* Not enough memory for the delayed delete, as last resort
 	 * block for all the fences to complete.
 	 */
-	dma_resv_wait_timeout(resv, true, false, MAX_SCHEDULE_TIMEOUT);
+	dma_resv_wait_timeout_rcu(resv, true, false,
+					    MAX_SCHEDULE_TIMEOUT);
 	amdgpu_pasid_free(pasid);
 }
 
@@ -182,7 +183,7 @@ bool amdgpu_vmid_had_gpu_reset(struct amdgpu_device *adev,
 }
 
 /**
- * amdgpu_vmid_grab_idle - grab idle VMID
+ * amdgpu_vm_grab_idle - grab idle VMID
  *
  * @vm: vm to allocate id for
  * @ring: ring we want to submit job to
@@ -207,18 +208,14 @@ static int amdgpu_vmid_grab_idle(struct amdgpu_vm *vm,
 	if (ring->vmid_wait && !dma_fence_is_signaled(ring->vmid_wait))
 		return amdgpu_sync_fence(sync, ring->vmid_wait);
 
-	fences = kmalloc_array(id_mgr->num_ids, sizeof(void *), GFP_KERNEL);
+	fences = kmalloc_array(sizeof(void *), id_mgr->num_ids, GFP_KERNEL);
 	if (!fences)
 		return -ENOMEM;
 
 	/* Check if we have an idle VMID */
 	i = 0;
 	list_for_each_entry((*idle), &id_mgr->ids_lru, list) {
-		/* Don't use per engine and per process VMID at the same time */
-		struct amdgpu_ring *r = adev->vm_manager.concurrent_flush ?
-			NULL : ring;
-
-		fences[i] = amdgpu_sync_peek_fence(&(*idle)->active, r);
+		fences[i] = amdgpu_sync_peek_fence(&(*idle)->active, ring);
 		if (!fences[i])
 			break;
 		++i;
@@ -255,14 +252,13 @@ static int amdgpu_vmid_grab_idle(struct amdgpu_vm *vm,
 }
 
 /**
- * amdgpu_vmid_grab_reserved - try to assign reserved VMID
+ * amdgpu_vm_grab_reserved - try to assign reserved VMID
  *
  * @vm: vm to allocate id for
  * @ring: ring we want to submit job to
  * @sync: sync object where we add dependencies
  * @fence: fence protecting ID from reuse
  * @job: job who wants to use the VMID
- * @id: resulting VMID
  *
  * Try to assign a reserved VMID.
  */
@@ -284,7 +280,7 @@ static int amdgpu_vmid_grab_reserved(struct amdgpu_vm *vm,
 	if (updates && (*id)->flushed_updates &&
 	    updates->context == (*id)->flushed_updates->context &&
 	    !dma_fence_is_later(updates, (*id)->flushed_updates))
-		updates = NULL;
+	    updates = NULL;
 
 	if ((*id)->owner != vm->immediate.fence_context ||
 	    job->vm_pd_addr != (*id)->pd_gpu_addr ||
@@ -292,10 +288,6 @@ static int amdgpu_vmid_grab_reserved(struct amdgpu_vm *vm,
 	    ((*id)->last_flush->context != fence_context &&
 	     !dma_fence_is_signaled((*id)->last_flush))) {
 		struct dma_fence *tmp;
-
-		/* Don't use per engine and per process VMID at the same time */
-		if (adev->vm_manager.concurrent_flush)
-			ring = NULL;
 
 		/* to prevent one context starved by another context */
 		(*id)->pd_gpu_addr = 0;
@@ -324,7 +316,7 @@ static int amdgpu_vmid_grab_reserved(struct amdgpu_vm *vm,
 }
 
 /**
- * amdgpu_vmid_grab_used - try to reuse a VMID
+ * amdgpu_vm_grab_used - try to reuse a VMID
  *
  * @vm: vm to allocate id for
  * @ring: ring we want to submit job to
@@ -372,7 +364,12 @@ static int amdgpu_vmid_grab_used(struct amdgpu_vm *vm,
 		if (updates && (!flushed || dma_fence_is_later(updates, flushed)))
 			needs_flush = true;
 
-		if (needs_flush && !adev->vm_manager.concurrent_flush)
+		/* Concurrent flushes are only possible starting with Vega10 and
+		 * are broken on Navi10 and Navi14.
+		 */
+		if (needs_flush && (adev->asic_type < CHIP_VEGA10 ||
+				    adev->asic_type == CHIP_NAVI10 ||
+				    adev->asic_type == CHIP_NAVI14))
 			continue;
 
 		/* Good, we can use this VMID. Remember this submission as
@@ -396,7 +393,7 @@ static int amdgpu_vmid_grab_used(struct amdgpu_vm *vm,
 }
 
 /**
- * amdgpu_vmid_grab - allocate the next free VMID
+ * amdgpu_vm_grab_id - allocate the next free VMID
  *
  * @vm: vm to allocate id for
  * @ring: ring we want to submit job to
@@ -517,7 +514,6 @@ void amdgpu_vmid_free_reserved(struct amdgpu_device *adev,
  * amdgpu_vmid_reset - reset VMID to zero
  *
  * @adev: amdgpu device structure
- * @vmhub: vmhub type
  * @vmid: vmid number to use
  *
  * Reset saved GDW, GWS and OA to force switch on next flush.

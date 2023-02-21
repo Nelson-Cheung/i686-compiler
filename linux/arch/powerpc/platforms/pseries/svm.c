@@ -55,17 +55,14 @@ void __init svm_swiotlb_init(void)
 	if (vstart && !swiotlb_init_with_tbl(vstart, io_tlb_nslabs, false))
 		return;
 
-
-	memblock_free_early(__pa(vstart),
-			    PAGE_ALIGN(io_tlb_nslabs << IO_TLB_SHIFT));
+	if (io_tlb_start)
+		memblock_free_early(io_tlb_start,
+				    PAGE_ALIGN(io_tlb_nslabs << IO_TLB_SHIFT));
 	panic("SVM: Cannot allocate SWIOTLB buffer");
 }
 
 int set_memory_encrypted(unsigned long addr, int numpages)
 {
-	if (!mem_encrypt_active())
-		return 0;
-
 	if (!PAGE_ALIGNED(addr))
 		return -EINVAL;
 
@@ -76,9 +73,6 @@ int set_memory_encrypted(unsigned long addr, int numpages)
 
 int set_memory_decrypted(unsigned long addr, int numpages)
 {
-	if (!mem_encrypt_active())
-		return 0;
-
 	if (!PAGE_ALIGNED(addr))
 		return -EINVAL;
 

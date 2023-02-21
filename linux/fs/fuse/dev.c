@@ -91,7 +91,7 @@ static void fuse_drop_waiting(struct fuse_conn *fc)
 {
 	/*
 	 * lockess check of fc->connected is okay, because atomic_dec_and_test()
-	 * provides a memory barrier matched with the one in fuse_wait_aborted()
+	 * provides a memory barrier mached with the one in fuse_wait_aborted()
 	 * to ensure no wake-up is missed.
 	 */
 	if (atomic_dec_and_test(&fc->num_waiting) &&
@@ -288,10 +288,10 @@ void fuse_request_end(struct fuse_req *req)
 
 	/*
 	 * test_and_set_bit() implies smp_mb() between bit
-	 * changing and below FR_INTERRUPTED check. Pairs with
+	 * changing and below intr_entry check. Pairs with
 	 * smp_mb() from queue_interrupt().
 	 */
-	if (test_bit(FR_INTERRUPTED, &req->flags)) {
+	if (!list_empty(&req->intr_entry)) {
 		spin_lock(&fiq->lock);
 		list_del_init(&req->intr_entry);
 		spin_unlock(&fiq->lock);
@@ -783,7 +783,6 @@ static int fuse_check_page(struct page *page)
 	       1 << PG_uptodate |
 	       1 << PG_lru |
 	       1 << PG_active |
-	       1 << PG_workingset |
 	       1 << PG_reclaim |
 	       1 << PG_waiters))) {
 		dump_page(page, "fuse: trying to steal weird page");
@@ -845,7 +844,11 @@ static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 	if (WARN_ON(PageMlocked(oldpage)))
 		goto out_fallback_unlock;
 
-	replace_page_cache_page(oldpage, newpage);
+	err = replace_page_cache_page(oldpage, newpage, GFP_KERNEL);
+	if (err) {
+		unlock_page(newpage);
+		goto out_put_old;
+	}
 
 	get_page(newpage);
 
@@ -1272,15 +1275,6 @@ static ssize_t fuse_dev_do_read(struct fuse_dev *fud, struct file *file,
 		goto restart;
 	}
 	spin_lock(&fpq->lock);
-	/*
-	 *  Must not put request on fpq->io queue after having been shut down by
-	 *  fuse_abort_conn()
-	 */
-	if (!fpq->connected) {
-		req->out.h.error = err = -ECONNABORTED;
-		goto out_end;
-
-	}
 	list_add(&req->list, &fpq->io);
 	spin_unlock(&fpq->lock);
 	cs->req = req;
@@ -1867,7 +1861,7 @@ static ssize_t fuse_dev_do_write(struct fuse_dev *fud,
 	}
 
 	err = -EINVAL;
-	if (oh.error <= -512 || oh.error > 0)
+	if (oh.error <= -1000 || oh.error > 0)
 		goto copy_finish;
 
 	spin_lock(&fpq->lock);
@@ -2239,18 +2233,19 @@ static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
-	int res;
-	int oldfd;
-	struct fuse_dev *fud = NULL;
+	int err = -ENOTTY;
 
-	switch (cmd) {
-	case FUSE_DEV_IOC_CLONE:
-		res = -EFAULT;
-		if (!get_user(oldfd, (__u32 __user *)arg)) {
+	if (cmd == FUSE_DEV_IOC_CLONE) {
+		int oldfd;
+
+		err = -EFAULT;
+		if (!get_user(oldfd, (__u32 __user *) arg)) {
 			struct file *old = fget(oldfd);
 
-			res = -EINVAL;
+			err = -EINVAL;
 			if (old) {
+				struct fuse_dev *fud = NULL;
+
 				/*
 				 * Check against file->f_op because CUSE
 				 * uses the same ioctl handler.
@@ -2261,18 +2256,14 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 
 				if (fud) {
 					mutex_lock(&fuse_mutex);
-					res = fuse_device_clone(fud->fc, file);
+					err = fuse_device_clone(fud->fc, file);
 					mutex_unlock(&fuse_mutex);
 				}
 				fput(old);
 			}
 		}
-		break;
-	default:
-		res = -ENOTTY;
-		break;
 	}
-	return res;
+	return err;
 }
 
 const struct file_operations fuse_dev_operations = {

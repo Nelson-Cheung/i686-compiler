@@ -44,7 +44,8 @@
 	.endm
 #endif
 
-#ifdef CONFIG_CPU_HAS_DIEI
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR5) || \
+    defined(CONFIG_CPU_MIPSR6)
 	.macro	local_irq_enable reg=t0
 	ei
 	irq_enable_hazard

@@ -24,4 +24,6 @@ obj-$(CONFIG_FSL_DPAA_ETH) += dpaa/
 
 obj-$(CONFIG_FSL_DPAA2_ETH) += dpaa2/
 
-obj-y += enetc/
+obj-$(CONFIG_FSL_ENETC) += enetc/
+obj-$(CONFIG_FSL_ENETC_MDIO) += enetc/
+obj-$(CONFIG_FSL_ENETC_VF) += enetc/

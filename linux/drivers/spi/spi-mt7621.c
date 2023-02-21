@@ -350,10 +350,9 @@ static int mt7621_spi_probe(struct platform_device *pdev)
 	if (status)
 		return status;
 
-	master = devm_spi_alloc_master(&pdev->dev, sizeof(*rs));
+	master = spi_alloc_master(&pdev->dev, sizeof(*rs));
 	if (!master) {
 		dev_info(&pdev->dev, "master allocation failed\n");
-		clk_disable_unprepare(clk);
 		return -ENOMEM;
 	}
 
@@ -378,15 +377,10 @@ static int mt7621_spi_probe(struct platform_device *pdev)
 	ret = device_reset(&pdev->dev);
 	if (ret) {
 		dev_err(&pdev->dev, "SPI reset failed!\n");
-		clk_disable_unprepare(clk);
 		return ret;
 	}
 
-	ret = spi_register_controller(master);
-	if (ret)
-		clk_disable_unprepare(clk);
-
-	return ret;
+	return devm_spi_register_controller(&pdev->dev, master);
 }
 
 static int mt7621_spi_remove(struct platform_device *pdev)
@@ -397,7 +391,6 @@ static int mt7621_spi_remove(struct platform_device *pdev)
 	master = dev_get_drvdata(&pdev->dev);
 	rs = spi_controller_get_devdata(master);
 
-	spi_unregister_controller(master);
 	clk_disable_unprepare(rs->clk);
 
 	return 0;

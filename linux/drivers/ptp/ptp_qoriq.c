@@ -189,16 +189,15 @@ int ptp_qoriq_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 	tmr_add = ptp_qoriq->tmr_add;
 	adj = tmr_add;
 
-	/*
-	 * Calculate diff and round() to the nearest integer
-	 *
-	 * diff = adj * (ppb / 1000000000)
-	 *      = adj * scaled_ppm / 65536000000
+	/* calculate diff as adj*(scaled_ppm/65536)/1000000
+	 * and round() to the nearest integer
 	 */
-	diff = mul_u64_u64_div_u64(adj, scaled_ppm, 32768000000);
-	diff = DIV64_U64_ROUND_UP(diff, 2);
+	adj *= scaled_ppm;
+	diff = div_u64(adj, 8000000);
+	diff = (diff >> 13) + ((diff >> 12) & 1);
 
 	tmr_add = neg_adj ? tmr_add - diff : tmr_add + diff;
+
 	ptp_qoriq->write(&regs->ctrl_regs->tmr_add, tmr_add);
 
 	return 0;

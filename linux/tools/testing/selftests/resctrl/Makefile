@@ -1,5 +1,5 @@
 CC = $(CROSS_COMPILE)gcc
-CFLAGS = -g -Wall -O2 -D_FORTIFY_SOURCE=2
+CFLAGS = -g -Wall
 SRCS=$(wildcard *.c)
 OBJS=$(SRCS:.c=.o)
 

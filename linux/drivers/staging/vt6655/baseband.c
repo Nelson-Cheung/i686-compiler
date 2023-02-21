@@ -3,6 +3,8 @@
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
  *
+ * File: baseband.c
+ *
  * Purpose: Implement functions to access baseband
  *
  * Author: Kyle Hsu
@@ -50,7 +52,7 @@
 /*---------------------  Static Variables  --------------------------*/
 
 #define CB_VT3253_INIT_FOR_RFMD 446
-static const unsigned char by_vt3253_init_tab_rfmd[CB_VT3253_INIT_FOR_RFMD][2] = {
+static const unsigned char byVT3253InitTab_RFMD[CB_VT3253_INIT_FOR_RFMD][2] = {
 	{0x00, 0x30},
 	{0x01, 0x00},
 	{0x02, 0x00},
@@ -1681,7 +1683,7 @@ static unsigned char byVT3253B0_AGC[CB_VT3253B0_AGC][2] = {
 	{0xF0, 0x00},
 };
 
-static const unsigned short awc_frame_time[MAX_RATE] = {
+static const unsigned short awcFrameTime[MAX_RATE] = {
 		10, 20, 55, 110, 24, 36, 48, 72, 96, 144, 192, 216
 };
 
@@ -1714,7 +1716,7 @@ unsigned int bb_get_frame_time(unsigned char by_preamble_type,
 	if (rate_idx > RATE_54M)
 		return 0;
 
-	rate = (unsigned int)awc_frame_time[rate_idx];
+	rate = (unsigned int)awcFrameTime[rate_idx];
 
 	if (rate_idx <= 3) {		    /* CCK mode */
 		if (by_preamble_type == 1) /* Short */
@@ -2000,8 +2002,8 @@ bool bb_vt3253_init(struct vnt_private *priv)
 		if (by_local_id <= REV_ID_VT3253_A1) {
 			for (ii = 0; ii < CB_VT3253_INIT_FOR_RFMD; ii++)
 				result &= bb_write_embedded(priv,
-					by_vt3253_init_tab_rfmd[ii][0],
-					by_vt3253_init_tab_rfmd[ii][1]);
+					byVT3253InitTab_RFMD[ii][0],
+					byVT3253InitTab_RFMD[ii][1]);
 
 		} else {
 			for (ii = 0; ii < CB_VT3253B0_INIT_FOR_RFMD; ii++)

@@ -252,6 +252,11 @@ static int fme_mgr_write_complete(struct fpga_manager *mgr,
 	return 0;
 }
 
+static enum fpga_mgr_states fme_mgr_state(struct fpga_manager *mgr)
+{
+	return FPGA_MGR_STATE_UNKNOWN;
+}
+
 static u64 fme_mgr_status(struct fpga_manager *mgr)
 {
 	struct fme_mgr_priv *priv = mgr->priv;
@@ -263,6 +268,7 @@ static const struct fpga_manager_ops fme_mgr_ops = {
 	.write_init = fme_mgr_write_init,
 	.write = fme_mgr_write,
 	.write_complete = fme_mgr_write_complete,
+	.state = fme_mgr_state,
 	.status = fme_mgr_status,
 };
 
@@ -308,8 +314,18 @@ static int fme_mgr_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	mgr->compat_id = compat_id;
+	platform_set_drvdata(pdev, mgr);
 
-	return devm_fpga_mgr_register(dev, mgr);
+	return fpga_mgr_register(mgr);
+}
+
+static int fme_mgr_remove(struct platform_device *pdev)
+{
+	struct fpga_manager *mgr = platform_get_drvdata(pdev);
+
+	fpga_mgr_unregister(mgr);
+
+	return 0;
 }
 
 static struct platform_driver fme_mgr_driver = {
@@ -317,6 +333,7 @@ static struct platform_driver fme_mgr_driver = {
 		.name    = DFL_FPGA_FME_MGR,
 	},
 	.probe   = fme_mgr_probe,
+	.remove  = fme_mgr_remove,
 };
 
 module_platform_driver(fme_mgr_driver);

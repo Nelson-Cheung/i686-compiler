@@ -17,7 +17,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/panic_notifier.h>
 #include <linux/pm_qos.h>
 #include <linux/slab.h>
 #include <linux/smp.h>
@@ -588,11 +587,11 @@ static int debug_probe(struct amba_device *adev, const struct amba_id *id)
 
 	drvdata->base = base;
 
-	cpus_read_lock();
+	get_online_cpus();
 	per_cpu(debug_drvdata, drvdata->cpu) = drvdata;
 	ret = smp_call_function_single(drvdata->cpu, debug_init_arch_data,
 				       drvdata, 1);
-	cpus_read_unlock();
+	put_online_cpus();
 
 	if (ret) {
 		dev_err(dev, "CPU%d debug arch init failed\n", drvdata->cpu);
@@ -628,7 +627,7 @@ err:
 	return ret;
 }
 
-static void debug_remove(struct amba_device *adev)
+static int debug_remove(struct amba_device *adev)
 {
 	struct device *dev = &adev->dev;
 	struct debug_drvdata *drvdata = amba_get_drvdata(adev);
@@ -643,6 +642,8 @@ static void debug_remove(struct amba_device *adev)
 
 	if (!--debug_count)
 		debug_func_exit();
+
+	return 0;
 }
 
 static const struct amba_cs_uci_id uci_id_debug[] = {

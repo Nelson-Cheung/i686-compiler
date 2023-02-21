@@ -105,8 +105,7 @@ static void lmc_driver_timeout(struct net_device *dev, unsigned int txqueue);
  * linux reserves 16 device specific IOCTLs.  We call them
  * LMCIOC* to control various bits of our world.
  */
-static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
-			      void __user *data, int cmd) /*fold00*/
+int lmc_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd) /*fold00*/
 {
     lmc_softc_t *sc = dev_to_sc(dev);
     lmc_ctl_t ctl;
@@ -125,7 +124,7 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
          * To date internally, just copy this out to the user.
          */
     case LMCIOCGINFO: /*fold01*/
-	if (copy_to_user(data, &sc->ictl, sizeof(lmc_ctl_t)))
+	if (copy_to_user(ifr->ifr_data, &sc->ictl, sizeof(lmc_ctl_t)))
 		ret = -EFAULT;
 	else
 		ret = 0;
@@ -142,7 +141,7 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
             break;
         }
 
-	if (copy_from_user(&ctl, data, sizeof(lmc_ctl_t))) {
+	if (copy_from_user(&ctl, ifr->ifr_data, sizeof(lmc_ctl_t))) {
 		ret = -EFAULT;
 		break;
 	}
@@ -172,7 +171,7 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
 		break;
 	    }
 
-	    if (copy_from_user(&new_type, data, sizeof(u16))) {
+	    if (copy_from_user(&new_type, ifr->ifr_data, sizeof(u16))) {
 		ret = -EFAULT;
 		break;
 	    }
@@ -212,7 +211,8 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
 
         sc->lmc_xinfo.Magic1 = 0xDEADBEEF;
 
-	if (copy_to_user(data, &sc->lmc_xinfo, sizeof(struct lmc_xinfo)))
+        if (copy_to_user(ifr->ifr_data, &sc->lmc_xinfo,
+			 sizeof(struct lmc_xinfo)))
 		ret = -EFAULT;
 	else
 		ret = 0;
@@ -245,9 +245,9 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
 			    regVal & T1FRAMER_SEF_MASK;
 	    }
 	    spin_unlock_irqrestore(&sc->lmc_lock, flags);
-	    if (copy_to_user(data, &sc->lmc_device->stats,
+	    if (copy_to_user(ifr->ifr_data, &sc->lmc_device->stats,
 			     sizeof(sc->lmc_device->stats)) ||
-		copy_to_user(data + sizeof(sc->lmc_device->stats),
+		copy_to_user(ifr->ifr_data + sizeof(sc->lmc_device->stats),
 			     &sc->extra_stats, sizeof(sc->extra_stats)))
 		    ret = -EFAULT;
 	    else
@@ -282,7 +282,7 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
             break;
         }
 
-	if (copy_from_user(&ctl, data, sizeof(lmc_ctl_t))) {
+	if (copy_from_user(&ctl, ifr->ifr_data, sizeof(lmc_ctl_t))) {
 		ret = -EFAULT;
 		break;
 	}
@@ -314,11 +314,11 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
 
 #ifdef DEBUG
     case LMCIOCDUMPEVENTLOG:
-	if (copy_to_user(data, &lmcEventLogIndex, sizeof(u32))) {
+	if (copy_to_user(ifr->ifr_data, &lmcEventLogIndex, sizeof(u32))) {
 		ret = -EFAULT;
 		break;
 	}
-	if (copy_to_user(data + sizeof(u32), lmcEventLogBuf,
+	if (copy_to_user(ifr->ifr_data + sizeof(u32), lmcEventLogBuf,
 			 sizeof(lmcEventLogBuf)))
 		ret = -EFAULT;
 	else
@@ -346,15 +346,16 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
              */
             netif_stop_queue(dev);
 
-	    if (copy_from_user(&xc, data, sizeof(struct lmc_xilinx_control))) {
+	    if (copy_from_user(&xc, ifr->ifr_data, sizeof(struct lmc_xilinx_control))) {
 		ret = -EFAULT;
 		break;
 	    }
             switch(xc.command){
             case lmc_xilinx_reset: /*fold02*/
                 {
+                    u16 mii;
 		    spin_lock_irqsave(&sc->lmc_lock, flags);
-                    lmc_mii_readreg (sc, 0, 16);
+                    mii = lmc_mii_readreg (sc, 0, 16);
 
                     /*
                      * Make all of them 0 and make input
@@ -423,9 +424,10 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
                 break;
             case lmc_xilinx_load_prom: /*fold02*/
                 {
+                    u16 mii;
                     int timeout = 500000;
 		    spin_lock_irqsave(&sc->lmc_lock, flags);
-                    lmc_mii_readreg (sc, 0, 16);
+                    mii = lmc_mii_readreg (sc, 0, 16);
 
                     /*
                      * Make all of them 0 and make input
@@ -609,8 +611,10 @@ static int lmc_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
 
         }
         break;
-    default:
-	break;
+    default: /*fold01*/
+        /* If we don't know what to do, give the protocol a shot. */
+        ret = lmc_proto_ioctl (sc, ifr, cmd);
+        break;
     }
 
     return ret;
@@ -786,8 +790,7 @@ static const struct net_device_ops lmc_ops = {
 	.ndo_open       = lmc_open,
 	.ndo_stop       = lmc_close,
 	.ndo_start_xmit = hdlc_start_xmit,
-	.ndo_siocwandev = hdlc_ioctl,
-	.ndo_siocdevprivate = lmc_siocdevprivate,
+	.ndo_do_ioctl   = lmc_ioctl,
 	.ndo_tx_timeout = lmc_driver_timeout,
 	.ndo_get_stats  = lmc_get_stats,
 };
@@ -853,7 +856,7 @@ static int lmc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	spin_lock_init(&sc->lmc_lock);
 	pci_set_master(pdev);
 
-	printk(KERN_INFO "hdlc: detected at %lx, irq %d\n",
+	printk(KERN_INFO "%s: detected at %lx, irq %d\n", dev->name,
 	       dev->base_addr, dev->irq);
 
 	err = register_hdlc_device(dev);
@@ -898,8 +901,6 @@ static int lmc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
         break;
     default:
 	printk(KERN_WARNING "%s: LMC UNKNOWN CARD!\n", dev->name);
-	unregister_hdlc_device(dev);
-	return -EIO;
         break;
     }
 
@@ -1184,6 +1185,7 @@ static irqreturn_t lmc_interrupt (int irq, void *dev_instance) /*fold00*/
     int i;
     s32 stat;
     unsigned int badtx;
+    u32 firstcsr;
     int max_work = LMC_RXDESCS;
     int handled = 0;
 
@@ -1200,6 +1202,8 @@ static irqreturn_t lmc_interrupt (int irq, void *dev_instance) /*fold00*/
     if ( ! (csr & sc->lmc_intrmask)) {
         goto lmc_int_fail_out;
     }
+
+    firstcsr = csr;
 
     /* always go through this loop at least once */
     while (csr & sc->lmc_intrmask) {

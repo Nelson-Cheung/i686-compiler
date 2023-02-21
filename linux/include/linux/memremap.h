@@ -17,7 +17,7 @@ struct device;
  * @alloc: track pages consumed, private to vmemmap_populate()
  */
 struct vmem_altmap {
-	unsigned long base_pfn;
+	const unsigned long base_pfn;
 	const unsigned long end_pfn;
 	const unsigned long reserve;
 	unsigned long free;
@@ -26,7 +26,7 @@ struct vmem_altmap {
 };
 
 /*
- * Specialize ZONE_DEVICE memory into multiple types each has a different
+ * Specialize ZONE_DEVICE memory into multiple types each having differents
  * usage.
  *
  * MEMORY_DEVICE_PRIVATE:
@@ -137,7 +137,6 @@ void *devm_memremap_pages(struct device *dev, struct dev_pagemap *pgmap);
 void devm_memunmap_pages(struct device *dev, struct dev_pagemap *pgmap);
 struct dev_pagemap *get_dev_pagemap(unsigned long pfn,
 		struct dev_pagemap *pgmap);
-bool pgmap_pfn_valid(struct dev_pagemap *pgmap, unsigned long pfn);
 
 unsigned long vmem_altmap_offset(struct vmem_altmap *altmap);
 void vmem_altmap_free(struct vmem_altmap *altmap, unsigned long nr_pfns);
@@ -164,11 +163,6 @@ static inline struct dev_pagemap *get_dev_pagemap(unsigned long pfn,
 		struct dev_pagemap *pgmap)
 {
 	return NULL;
-}
-
-static inline bool pgmap_pfn_valid(struct dev_pagemap *pgmap, unsigned long pfn)
-{
-	return false;
 }
 
 static inline unsigned long vmem_altmap_offset(struct vmem_altmap *altmap)

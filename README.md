@@ -4,7 +4,8 @@
 + binutils 2.38
 + gcc 11.1.0
 + glibc 2.35
-+ linux 5.15 
++ linux 5.10
++ automake 1.15
 
 测试通过的机器列表：
 
@@ -14,14 +15,18 @@
 安装需要的环境
 ```shell
 $ sudo apt update
-$ sudo apt install -y git 
+$ sudo apt install -y build-essential git texinfo bison flex m4
 ```
 
 下载交叉编译器代码
 ```shell
 $ cd ~/
+$ git config --global http.sslVerify false
 $ git clone https://github.com/NelsonCheung-cn/i686-compiler.git
+$ cd i686-compiler
+
 ```
+
 设置环境变量
 ```shell
 $ export PATH=$PATH:/opt/i686/bin
@@ -41,6 +46,17 @@ $ sudo make -j$(nproc) install
 ```shell
 $ cd ~/i686-compiler/linux
 $ sudo make ARCH=i386 INSTALL_HDR_PATH=/opt/i686/i686-linux-gnu/ headers_install
+$ sudo cp /opt/i686/i686-linux-gnu/include/linux/limits.h /opt/i686/i686-linux-gnu/include/limits.h
+```
+
+编译automake
+
+```shell
+$ cd ~/i686-compiler/automake
+$ mkdir build && cd build
+$ ../configure  --prefix=/opt/i686
+$ make -j$(nproc)
+$ sudo make -j$(nproc) install
 ```
 
 编译gmp库
@@ -49,7 +65,7 @@ $ cd ~/i686-compiler/gcc/gmp
 $ mkdir build && cd build
 $ ../configure --prefix=/opt/i686/
 $ make -j$(nproc)
-$ sudo make install
+$ sudo make -j$(nproc) install
 ```
 
 编译mpfr库
@@ -58,7 +74,7 @@ $ cd ~/i686-compiler/gcc/mpfr
 $ mkdir build && cd build
 $ ../configure --prefix=/opt/i686/ --with-gmp=/opt/i686/ 
 $ make -j$(nproc)
-$ sudo make install
+$ sudo make -j$(nproc) install
 ```
 
 编译mpc库
@@ -67,7 +83,7 @@ $ cd ~/i686-compiler/gcc/mpc
 $ mkdir build && cd build
 $ ../configure --prefix=/opt/i686/ --with-gmp=/opt/i686/ --with-mpfr=/opt/i686/
 $ make -j$(nproc)
-$ sudo make install
+$ sudo make -j$(nproc) install
 ```
 
 编译isl库
@@ -76,14 +92,14 @@ $ cd ~/i686-compiler/gcc/isl
 $ mkdir build && cd build
 $ ../configure --prefix=/opt/i686/ --with-gmp-prefix=/opt/i686/
 $ make -j$(nproc)
-$ sudo make install
+$ sudo make -j$(nproc) install
 ```
 
 编译C/C++编译器
 ```shell
 $ cd ~/i686-compiler/gcc
 $ mkdir build && cd build
-$ ../configure --prefix=/opt/i686/ --target=i686-linux-gnu --enable-languages=c,c++ --disable-multilib
+$ ../configure --prefix=/opt/i686/ --target=i686-linux-gnu --enable-languages=c,c++ --disable-multilib --disable-werror
 $ make -j$(nproc) all-gcc
 $ sudo make -j$(nproc) install-gcc
 ```
@@ -92,7 +108,7 @@ $ sudo make -j$(nproc) install-gcc
 ```shell
 $ cd ~/i686-compiler/glibc
 $ mkdir build && cd build
-$ ../configure --prefix=/opt/i686/i686-linux-gnu/ --host=i686-linux-gnu --target=i686-linux-gnu --with-headers=/opt/i686/i686-linux-gnu/include/ --disable-werror --enable-add-ons --disable-multilib
+$ ../configure --prefix=/opt/i686/i686-linux-gnu/ --host=i686-linux-gnu --target=i686-linux-gnu --disable-werror --disable-multilib
 $ sudo make install-bootstrap-headers=yes install-headers
 $ sudo make -j$(nproc) csu/subdir_lib 
 $ sudo install csu/crt1.o csu/crti.o csu/crtn.o /opt/i686/i686-linux-gnu/lib
@@ -110,15 +126,15 @@ $ sudo make install-target-libgcc
 编译Glibc
 ```shell
 $ cd ~/i686-compiler/glibc/build
-$ make -j$(nproc)
-$ sudo make install
+$ sudo make -j$(nproc)
+$ sudo make -j$(nproc) install
 ```
 
 编译标准C++库
 ```shell
 $ cd ~/i686-compiler/gcc/build
 $ make -j$(nproc)
-$ sudo make install
+$ sudo make -j$(nproc) install
 ```
 
 最后，在`/opt/i686/bin`下可以看到交叉编译器

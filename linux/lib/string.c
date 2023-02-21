@@ -29,7 +29,6 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 
-#include <asm/unaligned.h>
 #include <asm/byteorder.h>
 #include <asm/word-at-a-time.h>
 #include <asm/page.h>
@@ -86,6 +85,7 @@ EXPORT_SYMBOL(strcasecmp);
  * @dest: Where to copy the string to
  * @src: Where to copy the string from
  */
+#undef strcpy
 char *strcpy(char *dest, const char *src)
 {
 	char *tmp = dest;
@@ -302,6 +302,7 @@ EXPORT_SYMBOL(stpcpy);
  * @dest: The string to be appended to
  * @src: The string to append to it
  */
+#undef strcat
 char *strcat(char *dest, const char *src)
 {
 	char *tmp = dest;
@@ -377,6 +378,7 @@ EXPORT_SYMBOL(strlcat);
  * @cs: One string
  * @ct: Another string
  */
+#undef strcmp
 int strcmp(const char *cs, const char *ct)
 {
 	unsigned char c1, c2;
@@ -936,21 +938,6 @@ __visible int memcmp(const void *cs, const void *ct, size_t count)
 	const unsigned char *su1, *su2;
 	int res = 0;
 
-#ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
-	if (count >= sizeof(unsigned long)) {
-		const unsigned long *u1 = cs;
-		const unsigned long *u2 = ct;
-		do {
-			if (get_unaligned(u1) != get_unaligned(u2))
-				break;
-			u1++;
-			u2++;
-			count -= sizeof(unsigned long);
-		} while (count >= sizeof(unsigned long));
-		cs = u1;
-		ct = u2;
-	}
-#endif
 	for (su1 = cs, su2 = ct; 0 < count; ++su1, ++su2, count--)
 		if ((res = *su1 - *su2) != 0)
 			break;
@@ -971,6 +958,7 @@ EXPORT_SYMBOL(memcmp);
  * while this particular implementation is a simple (tail) call to memcmp, do
  * not rely on anything but whether the return value is zero or non-zero.
  */
+#undef bcmp
 int bcmp(const void *a, const void *b, size_t len)
 {
 	return memcmp(a, b, len);
@@ -993,7 +981,7 @@ void *memscan(void *addr, int c, size_t size)
 	unsigned char *p = addr;
 
 	while (size) {
-		if (*p == (unsigned char)c)
+		if (*p == c)
 			return (void *)p;
 		p++;
 		size--;

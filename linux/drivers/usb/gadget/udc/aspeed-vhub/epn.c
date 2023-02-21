@@ -5,6 +5,11 @@
  * epn.c - Generic endpoints management
  *
  * Copyright 2017 IBM Corporation
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -371,7 +376,7 @@ static int ast_vhub_epn_queue(struct usb_ep* u_ep, struct usb_request *u_req,
 	if (ep->epn.desc_mode ||
 	    ((((unsigned long)u_req->buf & 7) == 0) &&
 	     (ep->epn.is_in || !(u_req->length & (u_ep->maxpacket - 1))))) {
-		rc = usb_gadget_map_request_by_dev(&vhub->pdev->dev, u_req,
+		rc = usb_gadget_map_request(&ep->dev->gadget, u_req,
 					    ep->epn.is_in);
 		if (rc) {
 			dev_warn(&vhub->pdev->dev,
@@ -415,10 +420,7 @@ static void ast_vhub_stop_active_req(struct ast_vhub_ep *ep,
 	u32 state, reg, loops;
 
 	/* Stop DMA activity */
-	if (ep->epn.desc_mode)
-		writel(VHUB_EP_DMA_CTRL_RESET, ep->epn.regs + AST_VHUB_EP_DMA_CTLSTAT);
-	else
-		writel(0, ep->epn.regs + AST_VHUB_EP_DMA_CTLSTAT);
+	writel(0, ep->epn.regs + AST_VHUB_EP_DMA_CTLSTAT);
 
 	/* Wait for it to complete */
 	for (loops = 0; loops < 1000; loops++) {

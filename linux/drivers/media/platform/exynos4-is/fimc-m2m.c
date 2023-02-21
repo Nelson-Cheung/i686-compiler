@@ -73,13 +73,16 @@ static void fimc_m2m_shutdown(struct fimc_ctx *ctx)
 static int start_streaming(struct vb2_queue *q, unsigned int count)
 {
 	struct fimc_ctx *ctx = q->drv_priv;
+	int ret;
 
-	return pm_runtime_resume_and_get(&ctx->fimc_dev->pdev->dev);
+	ret = pm_runtime_get_sync(&ctx->fimc_dev->pdev->dev);
+	return ret > 0 ? 0 : ret;
 }
 
 static void stop_streaming(struct vb2_queue *q)
 {
 	struct fimc_ctx *ctx = q->drv_priv;
+
 
 	fimc_m2m_shutdown(ctx);
 	fimc_m2m_job_finish(ctx, VB2_BUF_STATE_ERROR);
@@ -112,12 +115,12 @@ static void fimc_device_run(void *priv)
 	}
 
 	src_vb = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
-	ret = fimc_prepare_addr(ctx, &src_vb->vb2_buf, sf, &sf->addr);
+	ret = fimc_prepare_addr(ctx, &src_vb->vb2_buf, sf, &sf->paddr);
 	if (ret)
 		goto dma_unlock;
 
 	dst_vb = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
-	ret = fimc_prepare_addr(ctx, &dst_vb->vb2_buf, df, &df->addr);
+	ret = fimc_prepare_addr(ctx, &dst_vb->vb2_buf, df, &df->paddr);
 	if (ret)
 		goto dma_unlock;
 
@@ -149,8 +152,8 @@ static void fimc_device_run(void *priv)
 			fimc_hw_set_rgb_alpha(ctx);
 		fimc_hw_set_output_path(ctx);
 	}
-	fimc_hw_set_input_addr(fimc, &sf->addr);
-	fimc_hw_set_output_addr(fimc, &df->addr, -1);
+	fimc_hw_set_input_addr(fimc, &sf->paddr);
+	fimc_hw_set_output_addr(fimc, &df->paddr, -1);
 
 	fimc_activate_capture(ctx);
 	ctx->state &= (FIMC_CTX_M2M | FIMC_CTX_CAP);

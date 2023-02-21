@@ -11,6 +11,7 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <net/if.h>
+#include <linux/if.h>
 #include <linux/rtnetlink.h>
 #include <linux/socket.h>
 #include <linux/tc_act/tc_bpf.h>
@@ -157,7 +158,7 @@ static int netlink_recv(int sock, __u32 nl_pid, __u32 seq,
 		if (len == 0)
 			break;
 
-		for (nh = (struct nlmsghdr *)buf; NLMSG_OK(nh, (unsigned int)len);
+		for (nh = (struct nlmsghdr *)buf; NLMSG_OK(nh, len);
 		     nh = NLMSG_NEXT(nh, len)) {
 			if (nh->nlmsg_pid != nl_pid) {
 				ret = -LIBBPF_ERRNO__WRNGPID;
@@ -729,7 +730,6 @@ static int do_help(int argc, char **argv)
 		"\n"
 		"       " HELP_SPEC_PROGRAM "\n"
 		"       ATTACH_TYPE := { xdp | xdpgeneric | xdpdrv | xdpoffload }\n"
-		"       " HELP_SPEC_OPTIONS " }\n"
 		"\n"
 		"Note: Only xdp and tc attachments are supported now.\n"
 		"      For progs attached to cgroups, use \"bpftool cgroup\"\n"

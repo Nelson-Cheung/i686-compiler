@@ -48,7 +48,7 @@ while true; do
 		-l | --list)
 			echo "$available"
 			exit 0 ;;
-		-d | --dry-run)
+		-n | --dry-run)
 			dryrun="echo"
 			shift ;;
 		-h | --help)

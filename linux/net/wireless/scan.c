@@ -5,7 +5,7 @@
  * Copyright 2008 Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
  * Copyright 2016	Intel Deutschland GmbH
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  */
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -418,16 +418,13 @@ cfg80211_add_nontrans_list(struct cfg80211_bss *trans_bss,
 	}
 	ssid_len = ssid[1];
 	ssid = ssid + 2;
+	rcu_read_unlock();
 
 	/* check if nontrans_bss is in the list */
 	list_for_each_entry(bss, &trans_bss->nontrans_list, nontrans_list) {
-		if (is_bss(bss, nontrans_bss->bssid, ssid, ssid_len)) {
-			rcu_read_unlock();
+		if (is_bss(bss, nontrans_bss->bssid, ssid, ssid_len))
 			return 0;
-		}
 	}
-
-	rcu_read_unlock();
 
 	/* add to the list */
 	list_add_tail(&nontrans_bss->nontrans_list, &trans_bss->nontrans_list);
@@ -592,7 +589,7 @@ static int cfg80211_parse_colocated_ap(const struct cfg80211_bss_ies *ies,
 
 	elem = cfg80211_find_elem(WLAN_EID_REDUCED_NEIGHBOR_REPORT, ies->data,
 				  ies->len);
-	if (!elem)
+	if (!elem || elem->datalen > IEEE80211_MAX_SSID_LEN)
 		return 0;
 
 	pos = elem->data;
@@ -621,7 +618,7 @@ static int cfg80211_parse_colocated_ap(const struct cfg80211_bss_ies *ies,
 
 		freq = ieee80211_channel_to_frequency(ap_info->channel, band);
 
-		if (end - pos < count * length)
+		if (end - pos < count * ap_info->tbtt_info_len)
 			break;
 
 		/*
@@ -633,7 +630,7 @@ static int cfg80211_parse_colocated_ap(const struct cfg80211_bss_ies *ies,
 		if (band != NL80211_BAND_6GHZ ||
 		    (length != IEEE80211_TBTT_INFO_OFFSET_BSSID_BSS_PARAM &&
 		     length < IEEE80211_TBTT_INFO_OFFSET_BSSID_SSSID_BSS_PARAM)) {
-			pos += count * length;
+			pos += count * ap_info->tbtt_info_len;
 			continue;
 		}
 
@@ -656,7 +653,7 @@ static int cfg80211_parse_colocated_ap(const struct cfg80211_bss_ies *ies,
 				kfree(entry);
 			}
 
-			pos += length;
+			pos += ap_info->tbtt_info_len;
 		}
 	}
 
@@ -697,7 +694,7 @@ static  void cfg80211_scan_req_add_chan(struct cfg80211_scan_request *request,
 static bool cfg80211_find_ssid_match(struct cfg80211_colocated_ap *ap,
 				     struct cfg80211_scan_request *request)
 {
-	int i;
+	u8 i;
 	u32 s_ssid;
 
 	for (i = 0; i < request->n_ssids; i++) {
@@ -729,7 +726,7 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 	int n_channels, count = 0, err;
 	struct cfg80211_scan_request *request, *rdev_req = rdev->scan_req;
 	LIST_HEAD(coloc_ap_list);
-	bool need_scan_psc = true;
+	bool need_scan_psc;
 	const struct ieee80211_sband_iftype_data *iftd;
 
 	rdev_req->scan_6ghz = true;
@@ -760,8 +757,7 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 	}
 
 	request = kzalloc(struct_size(request, channels, n_channels) +
-			  sizeof(*request->scan_6ghz_params) * count +
-			  sizeof(*request->ssids) * rdev_req->n_ssids,
+			  sizeof(*request->scan_6ghz_params) * count,
 			  GFP_KERNEL);
 	if (!request) {
 		cfg80211_free_coloc_ap_list(&coloc_ap_list);
@@ -774,18 +770,20 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 		(void *)&request->channels[n_channels];
 
 	/*
-	 * PSC channels should not be scanned in case of direct scan with 1 SSID
-	 * and at least one of the reported co-located APs with same SSID
-	 * indicating that all APs in the same ESS are co-located
+	 * PSC channels should not be scanned if all the reported co-located APs
+	 * are indicating that all APs in the same ESS are co-located
 	 */
-	if (count && request->n_ssids == 1 && request->ssids[0].ssid_len) {
+	if (count) {
+		need_scan_psc = false;
+
 		list_for_each_entry(ap, &coloc_ap_list, list) {
-			if (ap->colocated_ess &&
-			    cfg80211_find_ssid_match(ap, request)) {
-				need_scan_psc = false;
+			if (!ap->colocated_ess) {
+				need_scan_psc = true;
 				break;
 			}
 		}
+	} else {
+		need_scan_psc = true;
 	}
 
 	/*
@@ -852,17 +850,8 @@ skip:
 
 	if (request->n_channels) {
 		struct cfg80211_scan_request *old = rdev->int_scan_req;
-		rdev->int_scan_req = request;
 
-		/*
-		 * Add the ssids from the parent scan request to the new scan
-		 * request, so the driver would be able to use them in its
-		 * probe requests to discover hidden APs on PSC channels.
-		 */
-		request->ssids = (void *)&request->channels[request->n_channels];
-		request->n_ssids = rdev_req->n_ssids;
-		memcpy(request->ssids, rdev_req->ssids, sizeof(*request->ssids) *
-		       request->n_ssids);
+		rdev->int_scan_req = request;
 
 		/*
 		 * If this scan follows a previous scan, save the scan start
@@ -931,7 +920,7 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 	union iwreq_data wrqu;
 #endif
 
-	lockdep_assert_held(&rdev->wiphy.mtx);
+	ASSERT_RTNL();
 
 	if (rdev->scan_msg) {
 		nl80211_send_scan_msg(rdev, rdev->scan_msg);
@@ -978,7 +967,8 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 	}
 #endif
 
-	dev_put(wdev->netdev);
+	if (wdev->netdev)
+		dev_put(wdev->netdev);
 
 	kfree(rdev->int_scan_req);
 	rdev->int_scan_req = NULL;
@@ -999,9 +989,9 @@ void __cfg80211_scan_done(struct work_struct *wk)
 	rdev = container_of(wk, struct cfg80211_registered_device,
 			    scan_done_wk);
 
-	wiphy_lock(&rdev->wiphy);
+	rtnl_lock();
 	___cfg80211_scan_done(rdev, true);
-	wiphy_unlock(&rdev->wiphy);
+	rtnl_unlock();
 }
 
 void cfg80211_scan_done(struct cfg80211_scan_request *request,
@@ -1034,7 +1024,7 @@ EXPORT_SYMBOL(cfg80211_scan_done);
 void cfg80211_add_sched_scan_req(struct cfg80211_registered_device *rdev,
 				 struct cfg80211_sched_scan_request *req)
 {
-	lockdep_assert_held(&rdev->wiphy.mtx);
+	ASSERT_RTNL();
 
 	list_add_rcu(&req->list, &rdev->sched_scan_req_list);
 }
@@ -1042,7 +1032,7 @@ void cfg80211_add_sched_scan_req(struct cfg80211_registered_device *rdev,
 static void cfg80211_del_sched_scan_req(struct cfg80211_registered_device *rdev,
 					struct cfg80211_sched_scan_request *req)
 {
-	lockdep_assert_held(&rdev->wiphy.mtx);
+	ASSERT_RTNL();
 
 	list_del_rcu(&req->list);
 	kfree_rcu(req, rcu_head);
@@ -1054,7 +1044,7 @@ cfg80211_find_sched_scan_req(struct cfg80211_registered_device *rdev, u64 reqid)
 	struct cfg80211_sched_scan_request *pos;
 
 	list_for_each_entry_rcu(pos, &rdev->sched_scan_req_list, list,
-				lockdep_is_held(&rdev->wiphy.mtx)) {
+				lockdep_rtnl_is_held()) {
 		if (pos->reqid == reqid)
 			return pos;
 	}
@@ -1102,7 +1092,7 @@ void cfg80211_sched_scan_results_wk(struct work_struct *work)
 	rdev = container_of(work, struct cfg80211_registered_device,
 			   sched_scan_res_wk);
 
-	wiphy_lock(&rdev->wiphy);
+	rtnl_lock();
 	list_for_each_entry_safe(req, tmp, &rdev->sched_scan_req_list, list) {
 		if (req->report_results) {
 			req->report_results = false;
@@ -1117,7 +1107,7 @@ void cfg80211_sched_scan_results_wk(struct work_struct *work)
 						NL80211_CMD_SCHED_SCAN_RESULTS);
 		}
 	}
-	wiphy_unlock(&rdev->wiphy);
+	rtnl_unlock();
 }
 
 void cfg80211_sched_scan_results(struct wiphy *wiphy, u64 reqid)
@@ -1138,23 +1128,23 @@ void cfg80211_sched_scan_results(struct wiphy *wiphy, u64 reqid)
 }
 EXPORT_SYMBOL(cfg80211_sched_scan_results);
 
-void cfg80211_sched_scan_stopped_locked(struct wiphy *wiphy, u64 reqid)
+void cfg80211_sched_scan_stopped_rtnl(struct wiphy *wiphy, u64 reqid)
 {
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
 
-	lockdep_assert_held(&wiphy->mtx);
+	ASSERT_RTNL();
 
 	trace_cfg80211_sched_scan_stopped(wiphy, reqid);
 
 	__cfg80211_stop_sched_scan(rdev, reqid, true);
 }
-EXPORT_SYMBOL(cfg80211_sched_scan_stopped_locked);
+EXPORT_SYMBOL(cfg80211_sched_scan_stopped_rtnl);
 
 void cfg80211_sched_scan_stopped(struct wiphy *wiphy, u64 reqid)
 {
-	wiphy_lock(wiphy);
-	cfg80211_sched_scan_stopped_locked(wiphy, reqid);
-	wiphy_unlock(wiphy);
+	rtnl_lock();
+	cfg80211_sched_scan_stopped_rtnl(wiphy, reqid);
+	rtnl_unlock();
 }
 EXPORT_SYMBOL(cfg80211_sched_scan_stopped);
 
@@ -1162,7 +1152,7 @@ int cfg80211_stop_sched_scan_req(struct cfg80211_registered_device *rdev,
 				 struct cfg80211_sched_scan_request *req,
 				 bool driver_initiated)
 {
-	lockdep_assert_held(&rdev->wiphy.mtx);
+	ASSERT_RTNL();
 
 	if (!driver_initiated) {
 		int err = rdev_sched_scan_stop(rdev, req->dev, req->reqid);
@@ -1182,7 +1172,7 @@ int __cfg80211_stop_sched_scan(struct cfg80211_registered_device *rdev,
 {
 	struct cfg80211_sched_scan_request *sched_scan_req;
 
-	lockdep_assert_held(&rdev->wiphy.mtx);
+	ASSERT_RTNL();
 
 	sched_scan_req = cfg80211_find_sched_scan_req(rdev, reqid);
 	if (!sched_scan_req)
@@ -1756,14 +1746,14 @@ cfg80211_bss_update(struct cfg80211_registered_device *rdev,
 			 * be grouped with this beacon for updates ...
 			 */
 			if (!cfg80211_combine_bsses(rdev, new)) {
-				bss_ref_put(rdev, new);
+				kfree(new);
 				goto drop;
 			}
 		}
 
 		if (rdev->bss_entries >= bss_entries_limit &&
 		    !cfg80211_bss_expire_oldest(rdev)) {
-			bss_ref_put(rdev, new);
+			kfree(new);
 			goto drop;
 		}
 
@@ -1911,9 +1901,6 @@ cfg80211_inform_single_bss_data(struct wiphy *wiphy,
 	tmp.pub.beacon_interval = beacon_interval;
 	tmp.pub.capability = capability;
 	tmp.ts_boottime = data->boottime_ns;
-	tmp.parent_tsf = data->parent_tsf;
-	ether_addr_copy(tmp.parent_bssid, data->parent_bssid);
-
 	if (non_tx_data) {
 		tmp.pub.transmitted_bss = non_tx_data->tx_bss;
 		ts = bss_from_pub(non_tx_data->tx_bss)->ts;
@@ -2364,16 +2351,14 @@ cfg80211_inform_single_bss_frame_data(struct wiphy *wiphy,
 		return NULL;
 
 	if (ext) {
-		const struct ieee80211_s1g_bcn_compat_ie *compat;
-		const struct element *elem;
+		struct ieee80211_s1g_bcn_compat_ie *compat;
+		u8 *ie;
 
-		elem = cfg80211_find_elem(WLAN_EID_S1G_BCN_COMPAT,
-					  variable, ielen);
-		if (!elem)
+		ie = (void *)cfg80211_find_ie(WLAN_EID_S1G_BCN_COMPAT,
+					      variable, ielen);
+		if (!ie)
 			return NULL;
-		if (elem->datalen < sizeof(*compat))
-			return NULL;
-		compat = (void *)elem->data;
+		compat = (void *)(ie + 2);
 		bssid = ext->u.s1g_beacon.sa;
 		capability = le16_to_cpu(compat->compat_info);
 		beacon_int = le16_to_cpu(compat->beacon_int);
@@ -2788,8 +2773,6 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 
 	eth_broadcast_addr(creq->bssid);
 
-	wiphy_lock(&rdev->wiphy);
-
 	rdev->scan_req = creq;
 	err = rdev_scan(rdev, creq);
 	if (err) {
@@ -2801,7 +2784,6 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 		creq = NULL;
 		dev_hold(dev);
 	}
-	wiphy_unlock(&rdev->wiphy);
  out:
 	kfree(creq);
 	return err;

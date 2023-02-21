@@ -9,23 +9,16 @@
    in the right sequence from here. */
 static __init int pci_arch_init(void)
 {
-	int type, pcbios = 1;
+	int type;
+
+	x86_create_pci_msi_domain();
 
 	type = pci_direct_probe();
 
 	if (!(pci_probe & PCI_PROBE_NOEARLY))
 		pci_mmcfg_early_init();
 
-	if (x86_init.pci.arch_init)
-		pcbios = x86_init.pci.arch_init();
-
-	/*
-	 * Must happen after x86_init.pci.arch_init(). Xen sets up the
-	 * x86_init.irqs.create_pci_msi_domain there.
-	 */
-	x86_create_pci_msi_domain();
-
-	if (!pcbios)
+	if (x86_init.pci.arch_init && !x86_init.pci.arch_init())
 		return 0;
 
 	pci_pcbios_init();

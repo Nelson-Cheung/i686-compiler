@@ -83,7 +83,6 @@ static ssize_t proc_bus_pci_read(struct file *file, char __user *buf,
 		buf += 4;
 		pos += 4;
 		cnt -= 4;
-		cond_resched();
 	}
 
 	if (cnt >= 2) {
@@ -231,8 +230,8 @@ static long proc_bus_pci_ioctl(struct file *file, unsigned int cmd,
 			break;
 		}
 		/* If arch decided it can't, fall through... */
-		fallthrough;
 #endif /* HAVE_PCI_MMAP */
+		fallthrough;
 	default:
 		ret = -EINVAL;
 		break;
@@ -275,11 +274,6 @@ static int proc_bus_pci_mmap(struct file *file, struct vm_area_struct *vma)
 		else
 			return -EINVAL;
 	}
-
-	if (dev->resource[i].flags & IORESOURCE_MEM &&
-	    iomem_is_exclusive(dev->resource[i].start))
-		return -EINVAL;
-
 	ret = pci_mmap_page_range(dev, i, vma,
 				  fpriv->mmap_state, write_combine);
 	if (ret < 0)
@@ -299,7 +293,6 @@ static int proc_bus_pci_open(struct inode *inode, struct file *file)
 	fpriv->write_combine = 0;
 
 	file->private_data = fpriv;
-	file->f_mapping = iomem_get_mapping();
 
 	return 0;
 }

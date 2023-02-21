@@ -10,8 +10,6 @@
 #include <linux/seq_file.h>
 #include <linux/vmalloc.h>
 #include <linux/kexec.h>
-#include <linux/of.h>
-#include <linux/ima.h>
 #include "ima.h"
 
 #ifdef CONFIG_IMA_KEXEC
@@ -121,13 +119,14 @@ void ima_add_kexec_buffer(struct kimage *image)
 	ret = kexec_add_buffer(&kbuf);
 	if (ret) {
 		pr_err("Error passing over kexec measurement buffer.\n");
-		vfree(kexec_buffer);
 		return;
 	}
 
-	image->ima_buffer_addr = kbuf.mem;
-	image->ima_buffer_size = kexec_segment_size;
-	image->ima_buffer = kexec_buffer;
+	ret = arch_ima_add_kexec_buffer(image, kbuf.mem, kexec_segment_size);
+	if (ret) {
+		pr_err("Error passing over kexec measurement buffer.\n");
+		return;
+	}
 
 	pr_debug("kexec measurement buffer for the loaded kernel at 0x%lx.\n",
 		 kbuf.mem);

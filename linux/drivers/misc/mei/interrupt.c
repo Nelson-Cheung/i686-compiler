@@ -123,13 +123,13 @@ static int mei_cl_irq_read_msg(struct mei_cl *cl,
 
 	if (mei_hdr->extended) {
 		struct mei_ext_hdr *ext;
-		struct mei_ext_hdr_vtag *vtag_hdr = NULL;
+		struct mei_ext_hdr *vtag = NULL;
 
 		ext = mei_ext_begin(meta);
 		do {
 			switch (ext->type) {
 			case MEI_EXT_HDR_VTAG:
-				vtag_hdr = (struct mei_ext_hdr_vtag *)ext;
+				vtag = ext;
 				break;
 			case MEI_EXT_HDR_NONE:
 				fallthrough;
@@ -141,20 +141,20 @@ static int mei_cl_irq_read_msg(struct mei_cl *cl,
 			ext = mei_ext_next(ext);
 		} while (!mei_ext_last(meta, ext));
 
-		if (!vtag_hdr) {
+		if (!vtag) {
 			cl_dbg(dev, cl, "vtag not found in extended header.\n");
 			cb->status = -EPROTO;
 			goto discard;
 		}
 
-		cl_dbg(dev, cl, "vtag: %d\n", vtag_hdr->vtag);
-		if (cb->vtag && cb->vtag != vtag_hdr->vtag) {
+		cl_dbg(dev, cl, "vtag: %d\n", vtag->ext_payload[0]);
+		if (cb->vtag && cb->vtag != vtag->ext_payload[0]) {
 			cl_err(dev, cl, "mismatched tag: %d != %d\n",
-			       cb->vtag, vtag_hdr->vtag);
+			       cb->vtag, vtag->ext_payload[0]);
 			cb->status = -EPROTO;
 			goto discard;
 		}
-		cb->vtag = vtag_hdr->vtag;
+		cb->vtag = vtag->ext_payload[0];
 	}
 
 	if (!mei_cl_is_connected(cl)) {
@@ -277,9 +277,6 @@ static int mei_cl_irq_read(struct mei_cl *cl, struct mei_cl_cb *cb,
 		return ret;
 	}
 
-	pm_runtime_mark_last_busy(dev->dev);
-	pm_request_autosuspend(dev->dev);
-
 	list_move_tail(&cb->list, &cl->rd_pending);
 
 	return 0;
@@ -298,17 +295,12 @@ static inline bool hdr_is_fixed(struct mei_msg_hdr *mei_hdr)
 static inline int hdr_is_valid(u32 msg_hdr)
 {
 	struct mei_msg_hdr *mei_hdr;
-	u32 expected_len = 0;
 
 	mei_hdr = (struct mei_msg_hdr *)&msg_hdr;
 	if (!msg_hdr || mei_hdr->reserved)
 		return -EBADMSG;
 
-	if (mei_hdr->dma_ring)
-		expected_len += MEI_SLOT_SIZE;
-	if (mei_hdr->extended)
-		expected_len += MEI_SLOT_SIZE;
-	if (mei_hdr->length < expected_len)
+	if (mei_hdr->dma_ring && mei_hdr->length != MEI_SLOT_SIZE)
 		return -EBADMSG;
 
 	return 0;
@@ -331,8 +323,7 @@ int mei_irq_read_handler(struct mei_device *dev,
 	struct mei_ext_meta_hdr *meta_hdr = NULL;
 	struct mei_cl *cl;
 	int ret;
-	u32 hdr_size_left;
-	u32 hdr_size_ext;
+	u32 ext_meta_hdr_u32;
 	int i;
 	int ext_hdr_end;
 
@@ -362,30 +353,18 @@ int mei_irq_read_handler(struct mei_device *dev,
 	}
 
 	ext_hdr_end = 1;
-	hdr_size_left = mei_hdr->length;
 
 	if (mei_hdr->extended) {
 		if (!dev->rd_msg_hdr[1]) {
-			dev->rd_msg_hdr[1] = mei_read_hdr(dev);
+			ext_meta_hdr_u32 = mei_read_hdr(dev);
+			dev->rd_msg_hdr[1] = ext_meta_hdr_u32;
 			dev->rd_msg_hdr_count++;
 			(*slots)--;
-			dev_dbg(dev->dev, "extended header is %08x\n", dev->rd_msg_hdr[1]);
+			dev_dbg(dev->dev, "extended header is %08x\n",
+				ext_meta_hdr_u32);
 		}
-		meta_hdr = ((struct mei_ext_meta_hdr *)&dev->rd_msg_hdr[1]);
-		if (check_add_overflow((u32)sizeof(*meta_hdr),
-				       mei_slots2data(meta_hdr->size),
-				       &hdr_size_ext)) {
-			dev_err(dev->dev, "extended message size too big %d\n",
-				meta_hdr->size);
-			return -EBADMSG;
-		}
-		if (hdr_size_left < hdr_size_ext) {
-			dev_err(dev->dev, "corrupted message header len %d\n",
-				mei_hdr->length);
-			return -EBADMSG;
-		}
-		hdr_size_left -= hdr_size_ext;
-
+		meta_hdr = ((struct mei_ext_meta_hdr *)
+				dev->rd_msg_hdr + 1);
 		ext_hdr_end = meta_hdr->size + 2;
 		for (i = dev->rd_msg_hdr_count; i < ext_hdr_end; i++) {
 			dev->rd_msg_hdr[i] = mei_read_hdr(dev);
@@ -397,12 +376,6 @@ int mei_irq_read_handler(struct mei_device *dev,
 	}
 
 	if (mei_hdr->dma_ring) {
-		if (hdr_size_left != sizeof(dev->rd_msg_hdr[ext_hdr_end])) {
-			dev_err(dev->dev, "corrupted message header len %d\n",
-				mei_hdr->length);
-			return -EBADMSG;
-		}
-
 		dev->rd_msg_hdr[ext_hdr_end] = mei_read_hdr(dev);
 		dev->rd_msg_hdr_count++;
 		(*slots)--;
@@ -544,16 +517,6 @@ int mei_irq_write_handler(struct mei_device *dev, struct list_head *cmpl_list)
 		case MEI_FOP_NOTIFY_START:
 		case MEI_FOP_NOTIFY_STOP:
 			ret = mei_cl_irq_notify(cl, cb, cmpl_list);
-			if (ret)
-				return ret;
-			break;
-		case MEI_FOP_DMA_MAP:
-			ret = mei_cl_irq_dma_map(cl, cb, cmpl_list);
-			if (ret)
-				return ret;
-			break;
-		case MEI_FOP_DMA_UNMAP:
-			ret = mei_cl_irq_dma_unmap(cl, cb, cmpl_list);
 			if (ret)
 				return ret;
 			break;

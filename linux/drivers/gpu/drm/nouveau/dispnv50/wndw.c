@@ -30,7 +30,6 @@
 #include <nvhw/class/cl507e.h>
 #include <nvhw/class/clc37e.h>
 
-#include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_fourcc.h>
 
@@ -435,15 +434,12 @@ nv50_wndw_atomic_check_lut(struct nv50_wndw *wndw,
 }
 
 static int
-nv50_wndw_atomic_check(struct drm_plane *plane,
-		       struct drm_atomic_state *state)
+nv50_wndw_atomic_check(struct drm_plane *plane, struct drm_plane_state *state)
 {
-	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
-										 plane);
 	struct nouveau_drm *drm = nouveau_drm(plane->dev);
 	struct nv50_wndw *wndw = nv50_wndw(plane);
 	struct nv50_wndw_atom *armw = nv50_wndw_atom(wndw->plane.state);
-	struct nv50_wndw_atom *asyw = nv50_wndw_atom(new_plane_state);
+	struct nv50_wndw_atom *asyw = nv50_wndw_atom(state);
 	struct nv50_head_atom *harm = NULL, *asyh = NULL;
 	bool modeset = false;
 	int ret;
@@ -561,7 +557,7 @@ nv50_wndw_prepare_fb(struct drm_plane *plane, struct drm_plane_state *state)
 			asyw->image.handle[0] = ctxdma->object.handle;
 	}
 
-	asyw->state.fence = dma_resv_get_excl_unlocked(nvbo->bo.base.resv);
+	asyw->state.fence = dma_resv_get_excl_rcu(nvbo->bo.base.resv);
 	asyw->image.offset[0] = nvbo->offset;
 
 	if (wndw->func->prepare) {
@@ -706,11 +702,6 @@ nv50_wndw_init(struct nv50_wndw *wndw)
 	nvif_notify_get(&wndw->notify);
 }
 
-static const u64 nv50_cursor_format_modifiers[] = {
-	DRM_FORMAT_MOD_LINEAR,
-	DRM_FORMAT_MOD_INVALID,
-};
-
 int
 nv50_wndw_new_(const struct nv50_wndw_func *func, struct drm_device *dev,
 	       enum drm_plane_type type, const char *name, int index,
@@ -722,7 +713,6 @@ nv50_wndw_new_(const struct nv50_wndw_func *func, struct drm_device *dev,
 	struct nvif_mmu *mmu = &drm->client.mmu;
 	struct nv50_disp *disp = nv50_disp(dev);
 	struct nv50_wndw *wndw;
-	const u64 *format_modifiers;
 	int nformat;
 	int ret;
 
@@ -738,13 +728,10 @@ nv50_wndw_new_(const struct nv50_wndw_func *func, struct drm_device *dev,
 
 	for (nformat = 0; format[nformat]; nformat++);
 
-	if (type == DRM_PLANE_TYPE_CURSOR)
-		format_modifiers = nv50_cursor_format_modifiers;
-	else
-		format_modifiers = nouveau_display(dev)->format_modifiers;
-
-	ret = drm_universal_plane_init(dev, &wndw->plane, heads, &nv50_wndw, format, nformat,
-				       format_modifiers, type, "%s-%d", name, index);
+	ret = drm_universal_plane_init(dev, &wndw->plane, heads, &nv50_wndw,
+				       format, nformat,
+				       nouveau_display(dev)->format_modifiers,
+				       type, "%s-%d", name, index);
 	if (ret) {
 		kfree(*pwndw);
 		*pwndw = NULL;
@@ -797,7 +784,6 @@ nv50_wndw_new(struct nouveau_drm *drm, enum drm_plane_type type, int index,
 		int (*new)(struct nouveau_drm *, enum drm_plane_type,
 			   int, s32, struct nv50_wndw **);
 	} wndws[] = {
-		{ GA102_DISP_WINDOW_CHANNEL_DMA, 0, wndwc67e_new },
 		{ TU102_DISP_WINDOW_CHANNEL_DMA, 0, wndwc57e_new },
 		{ GV100_DISP_WINDOW_CHANNEL_DMA, 0, wndwc37e_new },
 		{}

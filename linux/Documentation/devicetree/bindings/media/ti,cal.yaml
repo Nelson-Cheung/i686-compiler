@@ -15,7 +15,10 @@ description: |-
   processing capability to connect CSI2 image-sensor modules to the
   DRA72x device.
 
-  CAL supports 2 camera port nodes on MIPI bus.
+  CAL supports 2 camera port nodes on MIPI bus. Each CSI2 camera port nodes
+  should contain a 'port' child node with child 'endpoint' node. Please
+  refer to the bindings defined in
+  Documentation/devicetree/bindings/media/video-interfaces.txt.
 
 properties:
   compatible:
@@ -64,19 +67,31 @@ properties:
       Documentation/devicetree/bindings/power/power_domain.txt
     maxItems: 1
 
+  # See ./video-interfaces.txt for details
   ports:
-    $ref: /schemas/graph.yaml#/properties/ports
+    type: object
+    additionalProperties: false
 
     properties:
+      "#address-cells":
+        const: 1
+
+      "#size-cells":
+        const: 0
+
       port@0:
-        $ref: /schemas/graph.yaml#/$defs/port-base
-        unevaluatedProperties: false
-        description: CSI2 Port #0
+        type: object
+        additionalProperties: false
 
         properties:
+          reg:
+            const: 0
+            description: CSI2 Port #0
+
+        patternProperties:
           endpoint:
-            $ref: video-interfaces.yaml#
-            unevaluatedProperties: false
+            type: object
+            additionalProperties: false
 
             properties:
               clock-lanes:
@@ -85,16 +100,25 @@ properties:
               data-lanes:
                 minItems: 1
                 maxItems: 4
+
+              remote-endpoint: true
+
+        required:
+          - reg
 
       port@1:
-        $ref: /schemas/graph.yaml#/$defs/port-base
-        unevaluatedProperties: false
-        description: CSI2 Port #1
+        type: object
+        additionalProperties: false
 
         properties:
+          reg:
+            const: 1
+            description: CSI2 Port #1
+
+        patternProperties:
           endpoint:
-            $ref: video-interfaces.yaml#
-            unevaluatedProperties: false
+            type: object
+            additionalProperties: false
 
             properties:
               clock-lanes:
@@ -104,7 +128,14 @@ properties:
                 minItems: 1
                 maxItems: 4
 
+              remote-endpoint: true
+
+        required:
+          - reg
+
     required:
+      - "#address-cells"
+      - "#size-cells"
       - port@0
 
 required:

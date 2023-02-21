@@ -31,6 +31,8 @@
     System Programming Guide; Section 9.11. (1997 edition - PPro).
 */
 
+#define DEBUG
+
 #include <linux/types.h> /* FIXME: kvm_para.h needs this */
 
 #include <linux/stop_machine.h>
@@ -336,7 +338,7 @@ int mtrr_add_page(unsigned long base, unsigned long size,
 	replace = -1;
 
 	/* No CPU hotplug when we change MTRR entries */
-	cpus_read_lock();
+	get_online_cpus();
 
 	/* Search for existing MTRR  */
 	mutex_lock(&mtrr_mutex);
@@ -398,7 +400,7 @@ int mtrr_add_page(unsigned long base, unsigned long size,
 	error = i;
  out:
 	mutex_unlock(&mtrr_mutex);
-	cpus_read_unlock();
+	put_online_cpus();
 	return error;
 }
 
@@ -485,7 +487,7 @@ int mtrr_del_page(int reg, unsigned long base, unsigned long size)
 
 	max = num_var_ranges;
 	/* No CPU hotplug when we change MTRR entries */
-	cpus_read_lock();
+	get_online_cpus();
 	mutex_lock(&mtrr_mutex);
 	if (reg < 0) {
 		/*  Search for existing MTRR  */
@@ -520,7 +522,7 @@ int mtrr_del_page(int reg, unsigned long base, unsigned long size)
 	error = reg;
  out:
 	mutex_unlock(&mtrr_mutex);
-	cpus_read_unlock();
+	put_online_cpus();
 	return error;
 }
 
@@ -792,6 +794,8 @@ void mtrr_ap_init(void)
 	if (!use_intel() || mtrr_aps_delayed_init)
 		return;
 
+	rcu_cpu_starting(smp_processor_id());
+
 	/*
 	 * Ideally we should hold mtrr_mutex here to avoid mtrr entries
 	 * changed, but this routine will be called in cpu boot time,
@@ -799,7 +803,7 @@ void mtrr_ap_init(void)
 	 *
 	 * This routine is called in two cases:
 	 *
-	 *   1. very early time of software resume, when there absolutely
+	 *   1. very earily time of software resume, when there absolutely
 	 *      isn't mtrr entry changes;
 	 *
 	 *   2. cpu hotadd time. We let mtrr_add/del_page hold cpuhotplug
@@ -809,8 +813,7 @@ void mtrr_ap_init(void)
 }
 
 /**
- * mtrr_save_state - Save current fixed-range MTRR state of the first
- *	cpu in cpu_online_mask.
+ * Save current fixed-range MTRR state of the first cpu in cpu_online_mask.
  */
 void mtrr_save_state(void)
 {

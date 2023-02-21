@@ -290,5 +290,5 @@ static int test(void)
 
 int main(void)
 {
-	return test_harness(test, "pkey_exec_prot");
+	test_harness(test, "pkey_exec_prot");
 }

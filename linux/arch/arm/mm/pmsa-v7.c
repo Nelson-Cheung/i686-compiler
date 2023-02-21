@@ -235,7 +235,6 @@ void __init pmsav7_adjust_lowmem_bounds(void)
 	phys_addr_t mem_end;
 	phys_addr_t reg_start, reg_end;
 	unsigned int mem_max_regions;
-	bool first = true;
 	int num;
 	u64 i;
 
@@ -264,7 +263,7 @@ void __init pmsav7_adjust_lowmem_bounds(void)
 #endif
 
 	for_each_mem_range(i, &reg_start, &reg_end) {
-		if (first) {
+		if (i == 0) {
 			phys_addr_t phys_offset = PHYS_OFFSET;
 
 			/*
@@ -276,7 +275,6 @@ void __init pmsav7_adjust_lowmem_bounds(void)
 			mem_start = reg_start;
 			mem_end = reg_end;
 			specified_mem_size = mem_end - mem_start;
-			first = false;
 		} else {
 			/*
 			 * memblock auto merges contiguous blocks, remove

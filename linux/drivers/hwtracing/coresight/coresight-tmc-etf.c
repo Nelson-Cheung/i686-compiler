@@ -37,7 +37,7 @@ static void __tmc_etb_enable_hw(struct tmc_drvdata *drvdata)
 
 static int tmc_etb_enable_hw(struct tmc_drvdata *drvdata)
 {
-	int rc = coresight_claim_device(drvdata->csdev);
+	int rc = coresight_claim_device(drvdata->base);
 
 	if (rc)
 		return rc;
@@ -88,7 +88,7 @@ static void __tmc_etb_disable_hw(struct tmc_drvdata *drvdata)
 static void tmc_etb_disable_hw(struct tmc_drvdata *drvdata)
 {
 	__tmc_etb_disable_hw(drvdata);
-	coresight_disclaim_device(drvdata->csdev);
+	coresight_disclaim_device(drvdata->base);
 }
 
 static void __tmc_etf_enable_hw(struct tmc_drvdata *drvdata)
@@ -109,7 +109,7 @@ static void __tmc_etf_enable_hw(struct tmc_drvdata *drvdata)
 
 static int tmc_etf_enable_hw(struct tmc_drvdata *drvdata)
 {
-	int rc = coresight_claim_device(drvdata->csdev);
+	int rc = coresight_claim_device(drvdata->base);
 
 	if (rc)
 		return rc;
@@ -120,13 +120,11 @@ static int tmc_etf_enable_hw(struct tmc_drvdata *drvdata)
 
 static void tmc_etf_disable_hw(struct tmc_drvdata *drvdata)
 {
-	struct coresight_device *csdev = drvdata->csdev;
-
 	CS_UNLOCK(drvdata->base);
 
 	tmc_flush_and_stop(drvdata);
 	tmc_disable_hw(drvdata);
-	coresight_disclaim_device_unlocked(csdev);
+	coresight_disclaim_device_unlocked(drvdata->base);
 	CS_LOCK(drvdata->base);
 }
 
@@ -229,7 +227,6 @@ static int tmc_enable_etf_sink_perf(struct coresight_device *csdev, void *data)
 	unsigned long flags;
 	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 	struct perf_output_handle *handle = data;
-	struct cs_buffers *buf = etm_perf_sink_config(handle);
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	do {
@@ -246,7 +243,7 @@ static int tmc_enable_etf_sink_perf(struct coresight_device *csdev, void *data)
 		}
 
 		/* Get a handle on the pid of the process to monitor */
-		pid = buf->pid;
+		pid = task_pid_nr(handle->event->owner);
 
 		if (drvdata->pid != -1 && drvdata->pid != pid) {
 			ret = -EBUSY;
@@ -402,7 +399,6 @@ static void *tmc_alloc_etf_buffer(struct coresight_device *csdev,
 	if (!buf)
 		return NULL;
 
-	buf->pid = task_pid_nr(event->owner);
 	buf->snapshot = overwrite;
 	buf->nr_pages = nr_pages;
 	buf->data_pages = pages;
@@ -530,7 +526,7 @@ static unsigned long tmc_update_etf_buffer(struct coresight_device *csdev,
 		buf_ptr = buf->data_pages[cur] + offset;
 		*buf_ptr = readl_relaxed(drvdata->base + TMC_RRD);
 
-		if (lost && i < CORESIGHT_BARRIER_PKT_SIZE) {
+		if (lost && *barrier) {
 			*buf_ptr = *barrier;
 			barrier++;
 		}

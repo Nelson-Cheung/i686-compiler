@@ -19,12 +19,11 @@ SYSCALL_DEFINE5(pciconfig_read, unsigned long, bus, unsigned long, dfn,
 	u8 byte;
 	u16 word;
 	u32 dword;
-	int err, cfg_ret;
+	long err;
+	long cfg_ret;
 
-	err = -EPERM;
-	dev = NULL;
 	if (!capable(CAP_SYS_ADMIN))
-		goto error;
+		return -EPERM;
 
 	err = -ENODEV;
 	dev = pci_get_domain_bus_and_slot(0, bus, dfn);
@@ -47,7 +46,7 @@ SYSCALL_DEFINE5(pciconfig_read, unsigned long, bus, unsigned long, dfn,
 	}
 
 	err = -EIO;
-	if (cfg_ret)
+	if (cfg_ret != PCIBIOS_SUCCESSFUL)
 		goto error;
 
 	switch (len) {
@@ -106,7 +105,7 @@ SYSCALL_DEFINE5(pciconfig_write, unsigned long, bus, unsigned long, dfn,
 		if (err)
 			break;
 		err = pci_user_write_config_byte(dev, off, byte);
-		if (err)
+		if (err != PCIBIOS_SUCCESSFUL)
 			err = -EIO;
 		break;
 
@@ -115,7 +114,7 @@ SYSCALL_DEFINE5(pciconfig_write, unsigned long, bus, unsigned long, dfn,
 		if (err)
 			break;
 		err = pci_user_write_config_word(dev, off, word);
-		if (err)
+		if (err != PCIBIOS_SUCCESSFUL)
 			err = -EIO;
 		break;
 
@@ -124,7 +123,7 @@ SYSCALL_DEFINE5(pciconfig_write, unsigned long, bus, unsigned long, dfn,
 		if (err)
 			break;
 		err = pci_user_write_config_dword(dev, off, dword);
-		if (err)
+		if (err != PCIBIOS_SUCCESSFUL)
 			err = -EIO;
 		break;
 

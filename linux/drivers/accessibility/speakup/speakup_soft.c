@@ -24,7 +24,7 @@
 #define CLEAR_SYNTH 0x18
 
 static int softsynth_probe(struct spk_synth *synth);
-static void softsynth_release(struct spk_synth *synth);
+static void softsynth_release(void);
 static int softsynth_is_alive(struct spk_synth *synth);
 static unsigned char get_index(struct spk_synth *synth);
 
@@ -153,25 +153,18 @@ static char *get_initstring(void)
 	static char buf[40];
 	char *cp;
 	struct var_t *var;
-	size_t len;
-	size_t n;
 
 	memset(buf, 0, sizeof(buf));
 	cp = buf;
-	len = sizeof(buf);
-
 	var = synth_soft.vars;
 	while (var->var_id != MAXVARS) {
 		if (var->var_id != CAPS_START && var->var_id != CAPS_STOP &&
-		    var->var_id != PAUSE && var->var_id != DIRECT) {
-			n = scnprintf(cp, len, var->u.n.synth_fmt,
-				      var->u.n.value);
-			cp = cp + n;
-			len = len - n;
-		}
+		    var->var_id != PAUSE && var->var_id != DIRECT)
+			cp = cp + sprintf(cp, var->u.n.synth_fmt,
+					  var->u.n.value);
 		var++;
 	}
-	cp = cp + scnprintf(cp, len, "\n");
+	cp = cp + sprintf(cp, "\n");
 	return buf;
 }
 
@@ -409,7 +402,7 @@ static int softsynth_probe(struct spk_synth *synth)
 	return 0;
 }
 
-static void softsynth_release(struct spk_synth *synth)
+static void softsynth_release(void)
 {
 	misc_deregister(&synth_device);
 	misc_deregister(&synthu_device);

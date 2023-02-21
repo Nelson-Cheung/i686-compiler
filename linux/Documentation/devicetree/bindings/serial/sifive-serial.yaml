@@ -12,15 +12,12 @@ maintainers:
   - Palmer Dabbelt <palmer@sifive.com>
 
 allOf:
-  - $ref: serial.yaml#
+  - $ref: /schemas/serial.yaml#
 
 properties:
   compatible:
     items:
-      - enum:
-          - sifive,fu540-c000-uart
-          - sifive,fu740-c000-uart
-          - canaan,k210-uarths
+      - const: sifive,fu540-c000-uart
       - const: sifive,uart0
 
     description:
@@ -49,7 +46,7 @@ required:
   - interrupts
   - clocks
 
-unevaluatedProperties: false
+additionalProperties: false
 
 examples:
   - |

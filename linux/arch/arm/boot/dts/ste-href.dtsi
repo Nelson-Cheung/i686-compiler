@@ -4,7 +4,6 @@
  */
 
 #include <dt-bindings/interrupt-controller/irq.h>
-#include <dt-bindings/leds/common.h>
 #include "ste-href-family-pinctrl.dtsi"
 
 / {
@@ -65,20 +64,17 @@
 					reg = <0>;
 					led-cur = /bits/ 8 <0x2f>;
 					max-cur = /bits/ 8 <0x5f>;
-					color = <LED_COLOR_ID_BLUE>;
 					linux,default-trigger = "heartbeat";
 				};
 				chan@1 {
 					reg = <1>;
 					led-cur = /bits/ 8 <0x2f>;
 					max-cur = /bits/ 8 <0x5f>;
-					color = <LED_COLOR_ID_BLUE>;
 				};
 				chan@2 {
 					reg = <2>;
 					led-cur = /bits/ 8 <0x2f>;
 					max-cur = /bits/ 8 <0x5f>;
-					color = <LED_COLOR_ID_BLUE>;
 				};
 			};
 			lp5521@34 {
@@ -92,19 +88,16 @@
 					reg = <0>;
 					led-cur = /bits/ 8 <0x2f>;
 					max-cur = /bits/ 8 <0x5f>;
-					color = <LED_COLOR_ID_BLUE>;
 				};
 				chan@1 {
 					reg = <1>;
 					led-cur = /bits/ 8 <0x2f>;
 					max-cur = /bits/ 8 <0x5f>;
-					color = <LED_COLOR_ID_BLUE>;
 				};
 				chan@2 {
 					reg = <2>;
 					led-cur = /bits/ 8 <0x2f>;
 					max-cur = /bits/ 8 <0x5f>;
-					color = <LED_COLOR_ID_BLUE>;
 				};
 			};
 			bh1780@29 {
@@ -120,8 +113,23 @@
 			status = "okay";
 		};
 
+		/* ST6G3244ME level translator for 1.8/2.9 V */
+		vmmci: regulator-gpio {
+			compatible = "regulator-gpio";
+
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2900000>;
+			regulator-name = "mmci-reg";
+			regulator-type = "voltage";
+
+			startup-delay-us = <100>;
+
+			states = <1800000 0x1
+				  2900000 0x0>;
+		};
+
 		// External Micro SD slot
-		mmc@80126000 {
+		sdi0_per1@80126000 {
 			arm,primecell-periphid = <0x10480180>;
 			max-frequency = <100000000>;
 			bus-width = <4>;
@@ -144,7 +152,7 @@
 		};
 
 		// WLAN SDIO channel
-		mmc@80118000 {
+		sdi1_per2@80118000 {
 			arm,primecell-periphid = <0x10480180>;
 			max-frequency = <100000000>;
 			bus-width = <4>;
@@ -157,14 +165,12 @@
 		};
 
 		// PoP:ed eMMC
-		mmc@80005000 {
+		sdi2_per3@80005000 {
 			arm,primecell-periphid = <0x10480180>;
 			max-frequency = <100000000>;
 			bus-width = <8>;
 			cap-mmc-highspeed;
 			non-removable;
-			no-sdio;
-			no-sd;
 			vmmc-supply = <&db8500_vsmps2_reg>;
 			pinctrl-names = "default", "sleep";
 			pinctrl-0 = <&mc2_a_1_default>;
@@ -174,14 +180,12 @@
 		};
 
 		// On-board eMMC
-		mmc@80114000 {
+		sdi4_per2@80114000 {
 			arm,primecell-periphid = <0x10480180>;
 		        max-frequency = <100000000>;
 			bus-width = <8>;
 			cap-mmc-highspeed;
 			non-removable;
-			no-sdio;
-			no-sd;
 			vmmc-supply = <&ab8500_ldo_aux2_reg>;
 			pinctrl-names = "default", "sleep";
 			pinctrl-0 = <&mc4_a_1_default>;
@@ -213,7 +217,7 @@
 
 		prcmu@80157000 {
 			ab8500 {
-				ab8500-gpiocontroller {
+				ab8500-gpio {
 				};
 
 				ab8500_usb {

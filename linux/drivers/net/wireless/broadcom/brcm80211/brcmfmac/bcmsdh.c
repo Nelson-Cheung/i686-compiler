@@ -128,8 +128,7 @@ int brcmf_sdiod_intr_register(struct brcmf_sdio_dev *sdiodev)
 
 		if (sdiodev->bus_if->chip == BRCM_CC_43362_CHIP_ID) {
 			/* assign GPIO to SDIO core */
-			addr = brcmf_chip_enum_base(sdiodev->func1->device);
-			addr = CORE_CC_REG(addr, gpiocontrol);
+			addr = CORE_CC_REG(SI_ENUM_BASE, gpiocontrol);
 			gpiocontrol = brcmf_sdiod_readl(sdiodev, addr, &ret);
 			gpiocontrol |= 0x2;
 			brcmf_sdiod_writel(sdiodev, addr, gpiocontrol, &ret);
@@ -368,7 +367,7 @@ static int mmc_submit_one(struct mmc_data *md, struct mmc_request *mr,
  * @func: SDIO function
  * @write: direction flag
  * @addr: dongle memory address as source/destination
- * @pktlist: skb buffer head pointer
+ * @pkt: skb pointer
  *
  * This function takes the respbonsibility as the interface function to MMC
  * stack for block data access. It assumes that the skb passed down by the
@@ -991,7 +990,6 @@ static const struct sdio_device_id brcmf_sdmmc_ids[] = {
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4359),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_CYPRESS_4373),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_CYPRESS_43012),
-	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_CYPRESS_43752),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_CYPRESS_89359),
 	{ /* end: all zeroes */ }
 };
@@ -1219,9 +1217,13 @@ static struct sdio_driver brcmf_sdmmc_driver = {
 	},
 };
 
-int brcmf_sdio_register(void)
+void brcmf_sdio_register(void)
 {
-	return sdio_register_driver(&brcmf_sdmmc_driver);
+	int ret;
+
+	ret = sdio_register_driver(&brcmf_sdmmc_driver);
+	if (ret)
+		brcmf_err("sdio_register_driver failed: %d\n", ret);
 }
 
 void brcmf_sdio_exit(void)

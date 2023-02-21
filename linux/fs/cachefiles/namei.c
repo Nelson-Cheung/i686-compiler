@@ -39,18 +39,18 @@ void __cachefiles_printk_object(struct cachefiles_object *object,
 	pr_err("%sops=%u inp=%u exc=%u\n",
 	       prefix, object->fscache.n_ops, object->fscache.n_in_progress,
 	       object->fscache.n_exclusive);
-	pr_err("%sparent=%x\n",
-	       prefix, object->fscache.parent ? object->fscache.parent->debug_id : 0);
+	pr_err("%sparent=%p\n",
+	       prefix, object->fscache.parent);
 
 	spin_lock(&object->fscache.lock);
 	cookie = object->fscache.cookie;
 	if (cookie) {
-		pr_err("%scookie=%x [pr=%x nd=%p fl=%lx]\n",
+		pr_err("%scookie=%p [pr=%p nd=%p fl=%lx]\n",
 		       prefix,
-		       cookie->debug_id,
-		       cookie->parent ? cookie->parent->debug_id : 0,
-		       cookie->netfs_data,
-		       cookie->flags);
+		       object->fscache.cookie,
+		       object->fscache.cookie->parent,
+		       object->fscache.cookie->netfs_data,
+		       object->fscache.cookie->flags);
 		pr_err("%skey=[%u] '", prefix, cookie->key_len);
 		k = (cookie->key_len <= sizeof(cookie->inline_key)) ?
 			cookie->inline_key : cookie->key;
@@ -110,7 +110,7 @@ static void cachefiles_mark_object_buried(struct cachefiles_cache *cache,
 
 	/* found the dentry for  */
 found_dentry:
-	kdebug("preemptive burial: OBJ%x [%s] %pd",
+	kdebug("preemptive burial: OBJ%x [%s] %p",
 	       object->fscache.debug_id,
 	       object->fscache.state->name,
 	       dentry);
@@ -140,7 +140,7 @@ static int cachefiles_mark_object_active(struct cachefiles_cache *cache,
 	struct rb_node **_p, *_parent = NULL;
 	struct dentry *dentry;
 
-	_enter(",%x", object->fscache.debug_id);
+	_enter(",%p", object);
 
 try_again:
 	write_lock(&cache->active_lock);
@@ -298,6 +298,8 @@ static int cachefiles_bury_object(struct cachefiles_cache *cache,
 
 	_enter(",'%pd','%pd'", dir, rep);
 
+	_debug("remove %p from %p", rep, dir);
+
 	/* non-directories can just be unlinked */
 	if (!d_is_dir(rep)) {
 		_debug("unlink stale object");
@@ -309,8 +311,7 @@ static int cachefiles_bury_object(struct cachefiles_cache *cache,
 			cachefiles_io_error(cache, "Unlink security error");
 		} else {
 			trace_cachefiles_unlink(object, rep, why);
-			ret = vfs_unlink(&init_user_ns, d_inode(dir), rep,
-					 NULL);
+			ret = vfs_unlink(d_inode(dir), rep, NULL);
 
 			if (preemptive)
 				cachefiles_mark_object_buried(cache, rep, why);
@@ -411,16 +412,9 @@ try_again:
 	if (ret < 0) {
 		cachefiles_io_error(cache, "Rename security error %d", ret);
 	} else {
-		struct renamedata rd = {
-			.old_mnt_userns	= &init_user_ns,
-			.old_dir	= d_inode(dir),
-			.old_dentry	= rep,
-			.new_mnt_userns	= &init_user_ns,
-			.new_dir	= d_inode(cache->graveyard),
-			.new_dentry	= grave,
-		};
 		trace_cachefiles_rename(object, rep, grave, why);
-		ret = vfs_rename(&rd);
+		ret = vfs_rename(d_inode(dir), rep,
+				 d_inode(cache->graveyard), grave, NULL, 0);
 		if (ret != 0 && ret != -ENOMEM)
 			cachefiles_io_error(cache,
 					    "Rename failed with error %d", ret);
@@ -444,7 +438,7 @@ int cachefiles_delete_object(struct cachefiles_cache *cache,
 	struct dentry *dir;
 	int ret;
 
-	_enter(",OBJ%x{%pd}", object->fscache.debug_id, object->dentry);
+	_enter(",OBJ%x{%p}", object->fscache.debug_id, object->dentry);
 
 	ASSERT(object->dentry);
 	ASSERT(d_backing_inode(object->dentry));
@@ -494,10 +488,11 @@ int cachefiles_walk_to_object(struct cachefiles_object *parent,
 	struct dentry *dir, *next = NULL;
 	struct inode *inode;
 	struct path path;
+	unsigned long start;
 	const char *name;
 	int ret, nlen;
 
-	_enter("OBJ%x{%pd},OBJ%x,%s,",
+	_enter("OBJ%x{%p},OBJ%x,%s,",
 	       parent->fscache.debug_id, parent->dentry,
 	       object->fscache.debug_id, key);
 
@@ -532,7 +527,9 @@ lookup_again:
 
 	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
 
+	start = jiffies;
 	next = lookup_one_len(name, dir, nlen);
+	cachefiles_hist(cachefiles_lookup_histogram, start);
 	if (IS_ERR(next)) {
 		trace_cachefiles_lookup(object, next, NULL);
 		goto lookup_error;
@@ -540,7 +537,7 @@ lookup_again:
 
 	inode = d_backing_inode(next);
 	trace_cachefiles_lookup(object, next, inode);
-	_debug("next -> %pd %s", next, inode ? "positive" : "negative");
+	_debug("next -> %p %s", next, inode ? "positive" : "negative");
 
 	if (!key)
 		object->new = !inode;
@@ -563,7 +560,9 @@ lookup_again:
 			ret = security_path_mkdir(&path, next, 0);
 			if (ret < 0)
 				goto create_error;
-			ret = vfs_mkdir(&init_user_ns, d_inode(dir), next, 0);
+			start = jiffies;
+			ret = vfs_mkdir(d_inode(dir), next, 0);
+			cachefiles_hist(cachefiles_mkdir_histogram, start);
 			if (!key)
 				trace_cachefiles_mkdir(object, next, ret);
 			if (ret < 0)
@@ -576,8 +575,8 @@ lookup_again:
 			}
 			ASSERT(d_backing_inode(next));
 
-			_debug("mkdir -> %pd{ino=%lu}",
-			       next, d_backing_inode(next)->i_ino);
+			_debug("mkdir -> %p{%p{ino=%lu}}",
+			       next, d_backing_inode(next), d_backing_inode(next)->i_ino);
 
 		} else if (!d_can_lookup(next)) {
 			pr_err("inode %lu is not a directory\n",
@@ -597,16 +596,17 @@ lookup_again:
 			ret = security_path_mknod(&path, next, S_IFREG, 0);
 			if (ret < 0)
 				goto create_error;
-			ret = vfs_create(&init_user_ns, d_inode(dir), next,
-					 S_IFREG, true);
+			start = jiffies;
+			ret = vfs_create(d_inode(dir), next, S_IFREG, true);
+			cachefiles_hist(cachefiles_create_histogram, start);
 			trace_cachefiles_create(object, next, ret);
 			if (ret < 0)
 				goto create_error;
 
 			ASSERT(d_backing_inode(next));
 
-			_debug("create -> %pd{ino=%lu}",
-			       next, d_backing_inode(next)->i_ino);
+			_debug("create -> %p{%p{ino=%lu}}",
+			       next, d_backing_inode(next), d_backing_inode(next)->i_ino);
 
 		} else if (!d_can_lookup(next) &&
 			   !d_is_reg(next)
@@ -756,6 +756,7 @@ struct dentry *cachefiles_get_directory(struct cachefiles_cache *cache,
 					const char *dirname)
 {
 	struct dentry *subdir;
+	unsigned long start;
 	struct path path;
 	int ret;
 
@@ -765,14 +766,16 @@ struct dentry *cachefiles_get_directory(struct cachefiles_cache *cache,
 	inode_lock(d_inode(dir));
 
 retry:
+	start = jiffies;
 	subdir = lookup_one_len(dirname, dir, strlen(dirname));
+	cachefiles_hist(cachefiles_lookup_histogram, start);
 	if (IS_ERR(subdir)) {
 		if (PTR_ERR(subdir) == -ENOMEM)
 			goto nomem_d_alloc;
 		goto lookup_error;
 	}
 
-	_debug("subdir -> %pd %s",
+	_debug("subdir -> %p %s",
 	       subdir, d_backing_inode(subdir) ? "positive" : "negative");
 
 	/* we need to create the subdir if it doesn't exist yet */
@@ -788,7 +791,7 @@ retry:
 		ret = security_path_mkdir(&path, subdir, 0700);
 		if (ret < 0)
 			goto mkdir_error;
-		ret = vfs_mkdir(&init_user_ns, d_inode(dir), subdir, 0700);
+		ret = vfs_mkdir(d_inode(dir), subdir, 0700);
 		if (ret < 0)
 			goto mkdir_error;
 
@@ -798,8 +801,10 @@ retry:
 		}
 		ASSERT(d_backing_inode(subdir));
 
-		_debug("mkdir -> %pd{ino=%lu}",
-		       subdir, d_backing_inode(subdir)->i_ino);
+		_debug("mkdir -> %p{%p{ino=%lu}}",
+		       subdir,
+		       d_backing_inode(subdir),
+		       d_backing_inode(subdir)->i_ino);
 	}
 
 	inode_unlock(d_inode(dir));
@@ -862,6 +867,7 @@ static struct dentry *cachefiles_check_active(struct cachefiles_cache *cache,
 	struct cachefiles_object *object;
 	struct rb_node *_n;
 	struct dentry *victim;
+	unsigned long start;
 	int ret;
 
 	//_enter(",%pd/,%s",
@@ -870,11 +876,13 @@ static struct dentry *cachefiles_check_active(struct cachefiles_cache *cache,
 	/* look up the victim */
 	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
 
+	start = jiffies;
 	victim = lookup_one_len(filename, dir, strlen(filename));
+	cachefiles_hist(cachefiles_lookup_histogram, start);
 	if (IS_ERR(victim))
 		goto lookup_error;
 
-	//_debug("victim -> %pd %s",
+	//_debug("victim -> %p %s",
 	//       victim, d_backing_inode(victim) ? "positive" : "negative");
 
 	/* if the object is no longer there then we probably retired the object
@@ -905,7 +913,7 @@ static struct dentry *cachefiles_check_active(struct cachefiles_cache *cache,
 
 	read_unlock(&cache->active_lock);
 
-	//_leave(" = %pd", victim);
+	//_leave(" = %p", victim);
 	return victim;
 
 object_in_use:
@@ -951,7 +959,7 @@ int cachefiles_cull(struct cachefiles_cache *cache, struct dentry *dir,
 	if (IS_ERR(victim))
 		return PTR_ERR(victim);
 
-	_debug("victim -> %pd %s",
+	_debug("victim -> %p %s",
 	       victim, d_backing_inode(victim) ? "positive" : "negative");
 
 	/* okay... the victim is not being used so we can cull it

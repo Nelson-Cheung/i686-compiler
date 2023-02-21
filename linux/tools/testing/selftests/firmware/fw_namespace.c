@@ -95,7 +95,7 @@ static bool test_fw_in_ns(const char *fw_name, const char *sys_path, bool block_
 		}
 		if (block_fw_in_parent_ns)
 			umount("/lib/firmware");
-		return WEXITSTATUS(status) == EXIT_SUCCESS;
+		return WEXITSTATUS(status) == EXIT_SUCCESS ? true : false;
 	}
 
 	if (unshare(CLONE_NEWNS) != 0) {
@@ -129,8 +129,7 @@ int main(int argc, char **argv)
 		die("mounting tmpfs to /lib/firmware failed\n");
 
 	sys_path = argv[1];
-	if (asprintf(&fw_path, "/lib/firmware/%s", fw_name) < 0)
-		die("error: failed to build full fw_path\n");
+	asprintf(&fw_path, "/lib/firmware/%s", fw_name);
 
 	setup_fw(fw_path);
 

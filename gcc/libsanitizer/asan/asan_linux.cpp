@@ -31,7 +31,7 @@
 #include <sys/types.h>
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <limits.h>
+#include <linux/limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <unistd.h>

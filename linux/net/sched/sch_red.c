@@ -242,7 +242,6 @@ static int __red_change(struct Qdisc *sch, struct nlattr **tb,
 	unsigned char flags;
 	int err;
 	u32 max_P;
-	u8 *stab;
 
 	if (tb[TCA_RED_PARMS] == NULL ||
 	    tb[TCA_RED_STAB] == NULL)
@@ -251,9 +250,7 @@ static int __red_change(struct Qdisc *sch, struct nlattr **tb,
 	max_P = tb[TCA_RED_MAX_P] ? nla_get_u32(tb[TCA_RED_MAX_P]) : 0;
 
 	ctl = nla_data(tb[TCA_RED_PARMS]);
-	stab = nla_data(tb[TCA_RED_STAB]);
-	if (!red_check_params(ctl->qth_min, ctl->qth_max, ctl->Wlog,
-			      ctl->Scell_log, stab))
+	if (!red_check_params(ctl->qth_min, ctl->qth_max, ctl->Wlog))
 		return -EINVAL;
 
 	err = red_get_flags(ctl->flags, TC_RED_HISTORIC_FLAGS,
@@ -291,7 +288,7 @@ static int __red_change(struct Qdisc *sch, struct nlattr **tb,
 	red_set_parms(&q->parms,
 		      ctl->qth_min, ctl->qth_max, ctl->Wlog,
 		      ctl->Plog, ctl->Scell_log,
-		      stab,
+		      nla_data(tb[TCA_RED_STAB]),
 		      max_P);
 	red_set_vars(&q->vars);
 

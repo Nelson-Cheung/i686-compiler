@@ -37,9 +37,9 @@ enum mchp_tc_count_function {
 	MCHP_TC_FUNCTION_QUADRATURE,
 };
 
-static const enum counter_function mchp_tc_count_functions[] = {
-	[MCHP_TC_FUNCTION_INCREASE] = COUNTER_FUNCTION_INCREASE,
-	[MCHP_TC_FUNCTION_QUADRATURE] = COUNTER_FUNCTION_QUADRATURE_X4,
+static enum counter_count_function mchp_tc_count_functions[] = {
+	[MCHP_TC_FUNCTION_INCREASE] = COUNTER_COUNT_FUNCTION_INCREASE,
+	[MCHP_TC_FUNCTION_QUADRATURE] = COUNTER_COUNT_FUNCTION_QUADRATURE_X4,
 };
 
 enum mchp_tc_synapse_action {
@@ -49,7 +49,7 @@ enum mchp_tc_synapse_action {
 	MCHP_TC_SYNAPSE_ACTION_BOTH_EDGE
 };
 
-static const enum counter_synapse_action mchp_tc_synapse_actions[] = {
+static enum counter_synapse_action mchp_tc_synapse_actions[] = {
 	[MCHP_TC_SYNAPSE_ACTION_NONE] = COUNTER_SYNAPSE_ACTION_NONE,
 	[MCHP_TC_SYNAPSE_ACTION_RISING_EDGE] = COUNTER_SYNAPSE_ACTION_RISING_EDGE,
 	[MCHP_TC_SYNAPSE_ACTION_FALLING_EDGE] = COUNTER_SYNAPSE_ACTION_FALLING_EDGE,
@@ -133,9 +133,6 @@ static int mchp_tc_count_function_set(struct counter_device *counter,
 		bmr |= ATMEL_TC_QDEN | ATMEL_TC_POSEN;
 		cmr |= ATMEL_TC_ETRGEDG_RISING | ATMEL_TC_ABETRG | ATMEL_TC_XC0;
 		break;
-	default:
-		/* should never reach this path */
-		return -EINVAL;
 	}
 
 	regmap_write(priv->regmap, ATMEL_TC_BMR, bmr);
@@ -158,7 +155,7 @@ static int mchp_tc_count_function_set(struct counter_device *counter,
 
 static int mchp_tc_count_signal_read(struct counter_device *counter,
 				     struct counter_signal *signal,
-				     enum counter_signal_level *lvl)
+				     enum counter_signal_value *val)
 {
 	struct mchp_tc_data *const priv = counter->priv;
 	bool sigstatus;
@@ -171,7 +168,7 @@ static int mchp_tc_count_signal_read(struct counter_device *counter,
 	else
 		sigstatus = (sr & ATMEL_TC_MTIOA);
 
-	*lvl = sigstatus ? COUNTER_SIGNAL_LEVEL_HIGH : COUNTER_SIGNAL_LEVEL_LOW;
+	*val = sigstatus ? COUNTER_SIGNAL_HIGH : COUNTER_SIGNAL_LOW;
 
 	return 0;
 }
@@ -186,20 +183,16 @@ static int mchp_tc_count_action_get(struct counter_device *counter,
 
 	regmap_read(priv->regmap, ATMEL_TC_REG(priv->channel[0], CMR), &cmr);
 
-	switch (cmr & ATMEL_TC_ETRGEDG) {
-	default:
+	*action = MCHP_TC_SYNAPSE_ACTION_NONE;
+
+	if (cmr & ATMEL_TC_ETRGEDG_NONE)
 		*action = MCHP_TC_SYNAPSE_ACTION_NONE;
-		break;
-	case ATMEL_TC_ETRGEDG_RISING:
+	else if (cmr & ATMEL_TC_ETRGEDG_RISING)
 		*action = MCHP_TC_SYNAPSE_ACTION_RISING_EDGE;
-		break;
-	case ATMEL_TC_ETRGEDG_FALLING:
+	else if (cmr & ATMEL_TC_ETRGEDG_FALLING)
 		*action = MCHP_TC_SYNAPSE_ACTION_FALLING_EDGE;
-		break;
-	case ATMEL_TC_ETRGEDG_BOTH:
+	else if (cmr & ATMEL_TC_ETRGEDG_BOTH)
 		*action = MCHP_TC_SYNAPSE_ACTION_BOTH_EDGE;
-		break;
-	}
 
 	return 0;
 }
@@ -229,9 +222,6 @@ static int mchp_tc_count_action_set(struct counter_device *counter,
 	case MCHP_TC_SYNAPSE_ACTION_BOTH_EDGE:
 		edge = ATMEL_TC_ETRGEDG_BOTH;
 		break;
-	default:
-		/* should never reach this path */
-		return -EINVAL;
 	}
 
 	return regmap_write_bits(priv->regmap,

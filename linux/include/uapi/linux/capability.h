@@ -243,6 +243,7 @@ struct vfs_ns_cap_data {
 /* Allow examination and configuration of disk quotas */
 /* Allow setting the domainname */
 /* Allow setting the hostname */
+/* Allow calling bdflush() */
 /* Allow mount() and umount(), setting up new smb connection */
 /* Allow some autofs root ioctls */
 /* Allow nfsservctl */
@@ -334,8 +335,7 @@ struct vfs_ns_cap_data {
 
 #define CAP_AUDIT_CONTROL    30
 
-/* Set or remove capabilities on files.
-   Map uid=0 into a child user namespace. */
+/* Set or remove capabilities on files */
 
 #define CAP_SETFCAP	     31
 

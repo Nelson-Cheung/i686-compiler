@@ -12,10 +12,9 @@ int i915_getparam_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv)
 {
 	struct drm_i915_private *i915 = to_i915(dev);
-	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	const struct sseu_dev_info *sseu = &i915->gt.info.sseu;
 	drm_i915_getparam_t *param = data;
-	int value = 0;
+	int value;
 
 	switch (param->param) {
 	case I915_PARAM_IRQ_ACTIVE:
@@ -25,10 +24,10 @@ int i915_getparam_ioctl(struct drm_device *dev, void *data,
 		/* Reject all old ums/dri params. */
 		return -ENODEV;
 	case I915_PARAM_CHIPSET_ID:
-		value = pdev->device;
+		value = i915->drm.pdev->device;
 		break;
 	case I915_PARAM_REVISION:
-		value = pdev->revision;
+		value = i915->drm.pdev->revision;
 		break;
 	case I915_PARAM_NUM_FENCES_AVAIL:
 		value = i915->ggtt.num_fences;
@@ -134,7 +133,6 @@ int i915_getparam_ioctl(struct drm_device *dev, void *data,
 	case I915_PARAM_HAS_EXEC_FENCE_ARRAY:
 	case I915_PARAM_HAS_EXEC_SUBMIT_FENCE:
 	case I915_PARAM_HAS_EXEC_TIMELINE_FENCES:
-	case I915_PARAM_HAS_USERPTR_PROBE:
 		/* For the time being all of these are always true;
 		 * if some supported hardware does not have one of these
 		 * features this value needs to be provided from
@@ -151,14 +149,12 @@ int i915_getparam_ioctl(struct drm_device *dev, void *data,
 			return -ENODEV;
 		break;
 	case I915_PARAM_SUBSLICE_MASK:
-		/* Only copy bits from the first slice */
-		memcpy(&value, sseu->subslice_mask,
-		       min(sseu->ss_stride, (u8)sizeof(value)));
+		value = sseu->subslice_mask[0];
 		if (!value)
 			return -ENODEV;
 		break;
 	case I915_PARAM_CS_TIMESTAMP_FREQUENCY:
-		value = i915->gt.clock_frequency;
+		value = RUNTIME_INFO(i915)->cs_timestamp_frequency_hz;
 		break;
 	case I915_PARAM_MMAP_GTT_COHERENT:
 		value = INTEL_INFO(i915)->has_coherent_ggtt;

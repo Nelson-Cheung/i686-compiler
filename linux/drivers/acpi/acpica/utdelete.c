@@ -112,7 +112,7 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 						       gpe_block);
 		}
 
-		ACPI_FALLTHROUGH;
+		/*lint -fallthrough */
 
 	case ACPI_TYPE_PROCESSOR:
 	case ACPI_TYPE_THERMAL:
@@ -283,14 +283,6 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 		if (second_desc) {
 			acpi_ut_delete_object_desc(second_desc);
 		}
-		break;
-
-	case ACPI_TYPE_LOCAL_ADDRESS_HANDLER:
-
-		ACPI_DEBUG_PRINT((ACPI_DB_ALLOCATIONS,
-				  "***** Address handler %p\n", object));
-
-		acpi_os_delete_mutex(object->address_space.context_mutex);
 		break;
 
 	default:

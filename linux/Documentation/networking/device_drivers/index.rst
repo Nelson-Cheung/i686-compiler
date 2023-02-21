@@ -15,10 +15,8 @@ Contents:
    ethernet/index
    fddi/index
    hamradio/index
-   qlogic/index
    wan/index
    wifi/index
-   wwan/index
 
 .. only::  subproject and html
 

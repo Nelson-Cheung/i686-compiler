@@ -53,8 +53,6 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_COLD:
 	case MADV_PAGEOUT:
 	case MADV_FREE:
-	case MADV_POPULATE_READ:
-	case MADV_POPULATE_WRITE:
 		return 0;
 	default:
 		/* be safe, default to 1. list exceptions explicitly */
@@ -508,9 +506,9 @@ static long madvise_cold(struct vm_area_struct *vma,
 		return -EINVAL;
 
 	lru_add_drain();
-	tlb_gather_mmu(&tlb, mm);
+	tlb_gather_mmu(&tlb, mm, start_addr, end_addr);
 	madvise_cold_page_range(&tlb, vma, start_addr, end_addr);
-	tlb_finish_mmu(&tlb);
+	tlb_finish_mmu(&tlb, start_addr, end_addr);
 
 	return 0;
 }
@@ -541,9 +539,8 @@ static inline bool can_do_pageout(struct vm_area_struct *vma)
 	 * otherwise we'd be including shared non-exclusive mappings, which
 	 * opens a side channel.
 	 */
-	return inode_owner_or_capable(&init_user_ns,
-				      file_inode(vma->vm_file)) ||
-	       file_permission(vma->vm_file, MAY_WRITE) == 0;
+	return inode_owner_or_capable(file_inode(vma->vm_file)) ||
+		inode_permission(file_inode(vma->vm_file), MAY_WRITE) == 0;
 }
 
 static long madvise_pageout(struct vm_area_struct *vma,
@@ -561,9 +558,9 @@ static long madvise_pageout(struct vm_area_struct *vma,
 		return 0;
 
 	lru_add_drain();
-	tlb_gather_mmu(&tlb, mm);
+	tlb_gather_mmu(&tlb, mm, start_addr, end_addr);
 	madvise_pageout_page_range(&tlb, vma, start_addr, end_addr);
-	tlb_finish_mmu(&tlb);
+	tlb_finish_mmu(&tlb, start_addr, end_addr);
 
 	return 0;
 }
@@ -726,7 +723,7 @@ static int madvise_free_single_vma(struct vm_area_struct *vma,
 				range.start, range.end);
 
 	lru_add_drain();
-	tlb_gather_mmu(&tlb, mm);
+	tlb_gather_mmu(&tlb, mm, range.start, range.end);
 	update_hiwater_rss(mm);
 
 	mmu_notifier_invalidate_range_start(&range);
@@ -735,7 +732,7 @@ static int madvise_free_single_vma(struct vm_area_struct *vma,
 			&madvise_free_walk_ops, &tlb);
 	tlb_end_vma(&tlb, vma);
 	mmu_notifier_invalidate_range_end(&range);
-	tlb_finish_mmu(&tlb);
+	tlb_finish_mmu(&tlb, range.start, range.end);
 
 	return 0;
 }
@@ -801,7 +798,7 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
 		if (end > vma->vm_end) {
 			/*
 			 * Don't fail if end > vma->vm_end. If the old
-			 * vma was split while the mmap_lock was
+			 * vma was splitted while the mmap_lock was
 			 * released the effect of the concurrent
 			 * operation may not cause madvise() to
 			 * have an undefined result. There may be an
@@ -822,63 +819,6 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
 		return madvise_free_single_vma(vma, start, end);
 	else
 		return -EINVAL;
-}
-
-static long madvise_populate(struct vm_area_struct *vma,
-			     struct vm_area_struct **prev,
-			     unsigned long start, unsigned long end,
-			     int behavior)
-{
-	const bool write = behavior == MADV_POPULATE_WRITE;
-	struct mm_struct *mm = vma->vm_mm;
-	unsigned long tmp_end;
-	int locked = 1;
-	long pages;
-
-	*prev = vma;
-
-	while (start < end) {
-		/*
-		 * We might have temporarily dropped the lock. For example,
-		 * our VMA might have been split.
-		 */
-		if (!vma || start >= vma->vm_end) {
-			vma = find_vma(mm, start);
-			if (!vma || start < vma->vm_start)
-				return -ENOMEM;
-		}
-
-		tmp_end = min_t(unsigned long, end, vma->vm_end);
-		/* Populate (prefault) page tables readable/writable. */
-		pages = faultin_vma_page_range(vma, start, tmp_end, write,
-					       &locked);
-		if (!locked) {
-			mmap_read_lock(mm);
-			locked = 1;
-			*prev = NULL;
-			vma = NULL;
-		}
-		if (pages < 0) {
-			switch (pages) {
-			case -EINTR:
-				return -EINTR;
-			case -EINVAL: /* Incompatible mappings / permissions. */
-				return -EINVAL;
-			case -EHWPOISON:
-				return -EHWPOISON;
-			case -EFAULT: /* VM_FAULT_SIGBUS or VM_FAULT_SIGSEGV */
-				return -EFAULT;
-			default:
-				pr_warn_once("%s: unhandled return value: %ld\n",
-					     __func__, pages);
-				fallthrough;
-			case -ENOMEM:
-				return -ENOMEM;
-			}
-		}
-		start += pages * PAGE_SIZE;
-	}
-	return 0;
 }
 
 /*
@@ -912,7 +852,7 @@ static long madvise_remove(struct vm_area_struct *vma,
 			+ ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
 
 	/*
-	 * Filesystem's fallocate may need to take i_rwsem.  We need to
+	 * Filesystem's fallocate may need to take i_mutex.  We need to
 	 * explicitly grab a reference because the vma (and hence the
 	 * vma's reference to the file) can go away as soon as we drop
 	 * mmap_lock.
@@ -937,6 +877,7 @@ static long madvise_remove(struct vm_area_struct *vma,
 static int madvise_inject_error(int behavior,
 		unsigned long start, unsigned long end)
 {
+	struct zone *zone;
 	unsigned long size;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -967,12 +908,23 @@ static int madvise_inject_error(int behavior,
 		} else {
 			pr_info("Injecting memory failure for pfn %#lx at process virtual address %#lx\n",
 				 pfn, start);
-			ret = memory_failure(pfn, MF_COUNT_INCREASED);
+			/*
+			 * Drop the page reference taken by get_user_pages_fast(). In
+			 * the absence of MF_COUNT_INCREASED the memory_failure()
+			 * routine is responsible for pinning the page to prevent it
+			 * from being released back to the page allocator.
+			 */
+			put_page(page);
+			ret = memory_failure(pfn, 0);
 		}
 
 		if (ret)
 			return ret;
 	}
+
+	/* Ensure that all poisoned pages are removed from per-cpu lists */
+	for_each_populated_zone(zone)
+		drain_all_pages(zone);
 
 	return 0;
 }
@@ -994,9 +946,6 @@ madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 	case MADV_FREE:
 	case MADV_DONTNEED:
 		return madvise_dontneed_free(vma, prev, start, end, behavior);
-	case MADV_POPULATE_READ:
-	case MADV_POPULATE_WRITE:
-		return madvise_populate(vma, prev, start, end, behavior);
 	default:
 		return madvise_behavior(vma, prev, start, end, behavior);
 	}
@@ -1017,8 +966,6 @@ madvise_behavior_valid(int behavior)
 	case MADV_FREE:
 	case MADV_COLD:
 	case MADV_PAGEOUT:
-	case MADV_POPULATE_READ:
-	case MADV_POPULATE_WRITE:
 #ifdef CONFIG_KSM
 	case MADV_MERGEABLE:
 	case MADV_UNMERGEABLE:
@@ -1048,7 +995,6 @@ process_madvise_behavior_valid(int behavior)
 	switch (behavior) {
 	case MADV_COLD:
 	case MADV_PAGEOUT:
-	case MADV_WILLNEED:
 		return true;
 	default:
 		return false;
@@ -1104,13 +1050,9 @@ process_madvise_behavior_valid(int behavior)
  *  MADV_DODUMP - cancel MADV_DONTDUMP: no longer exclude from core dump.
  *  MADV_COLD - the application is not expected to use this memory soon,
  *		deactivate pages in this range so that they can be reclaimed
- *		easily if memory pressure happens.
+ *		easily if memory pressure hanppens.
  *  MADV_PAGEOUT - the application is not expected to use this memory soon,
  *		page out the pages in this range immediately.
- *  MADV_POPULATE_READ - populate (prefault) page tables readable by
- *		triggering read faults if required
- *  MADV_POPULATE_WRITE - populate (prefault) page tables writable by
- *		triggering write faults if required
  *
  * return values:
  *  zero    - success
@@ -1267,20 +1209,10 @@ SYSCALL_DEFINE5(process_madvise, int, pidfd, const struct iovec __user *, vec,
 		goto release_task;
 	}
 
-	/* Require PTRACE_MODE_READ to avoid leaking ASLR metadata. */
-	mm = mm_access(task, PTRACE_MODE_READ_FSCREDS);
+	mm = mm_access(task, PTRACE_MODE_ATTACH_FSCREDS);
 	if (IS_ERR_OR_NULL(mm)) {
 		ret = IS_ERR(mm) ? PTR_ERR(mm) : -ESRCH;
 		goto release_task;
-	}
-
-	/*
-	 * Require CAP_SYS_NICE for influencing process performance. Note that
-	 * only non-destructive hints are currently supported.
-	 */
-	if (!capable(CAP_SYS_NICE)) {
-		ret = -EPERM;
-		goto release_mm;
 	}
 
 	total_len = iov_iter_count(&iter);
@@ -1297,7 +1229,6 @@ SYSCALL_DEFINE5(process_madvise, int, pidfd, const struct iovec __user *, vec,
 	if (ret == 0)
 		ret = total_len - iov_iter_count(&iter);
 
-release_mm:
 	mmput(mm);
 release_task:
 	put_task_struct(task);

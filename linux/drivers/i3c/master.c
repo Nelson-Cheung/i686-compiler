@@ -322,15 +322,19 @@ static int i3c_device_probe(struct device *dev)
 	return driver->probe(i3cdev);
 }
 
-static void i3c_device_remove(struct device *dev)
+static int i3c_device_remove(struct device *dev)
 {
 	struct i3c_device *i3cdev = dev_to_i3cdev(dev);
 	struct i3c_driver *driver = drv_to_i3cdrv(dev->driver);
+	int ret;
 
-	if (driver->remove)
-		driver->remove(i3cdev);
+	ret = driver->remove(i3cdev);
+	if (ret)
+		return ret;
 
 	i3c_device_free_ibi(i3cdev);
+
+	return ret;
 }
 
 struct bus_type i3c_bus_type = {

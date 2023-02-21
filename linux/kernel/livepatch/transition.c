@@ -9,7 +9,6 @@
 
 #include <linux/cpu.h>
 #include <linux/stacktrace.h>
-#include <linux/tracehook.h>
 #include "core.h"
 #include "patch.h"
 #include "transition.h"
@@ -370,7 +369,9 @@ static void klp_send_signals(void)
 			 * Send fake signal to all non-kthread tasks which are
 			 * still not migrated.
 			 */
-			set_notify_signal(task);
+			spin_lock_irq(&task->sighand->siglock);
+			signal_wake_up(task, 0);
+			spin_unlock_irq(&task->sighand->siglock);
 		}
 	}
 	read_unlock(&tasklist_lock);
@@ -411,7 +412,7 @@ void klp_try_complete_transition(void)
 	/*
 	 * Ditto for the idle "swapper" tasks.
 	 */
-	cpus_read_lock();
+	get_online_cpus();
 	for_each_possible_cpu(cpu) {
 		task = idle_task(cpu);
 		if (cpu_online(cpu)) {
@@ -423,7 +424,7 @@ void klp_try_complete_transition(void)
 			task->patch_state = klp_target_state;
 		}
 	}
-	cpus_read_unlock();
+	put_online_cpus();
 
 	if (!complete) {
 		if (klp_signals_cnt && !(klp_signals_cnt % SIGNALS_TIMEOUT))

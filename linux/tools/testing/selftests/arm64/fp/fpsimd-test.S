@@ -457,7 +457,7 @@ function barf
 	mov	x11, x1	// actual data
 	mov	x12, x2	// data size
 
-	puts	"Mismatch: PID="
+	puts	"Mistatch: PID="
 	mov	x0, x20
 	bl	putdec
 	puts	", iteration="

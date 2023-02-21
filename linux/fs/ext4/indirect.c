@@ -354,8 +354,7 @@ static int ext4_alloc_branch(handle_t *handle,
 		}
 		lock_buffer(bh);
 		BUFFER_TRACE(bh, "call get_create_access");
-		err = ext4_journal_get_create_access(handle, ar->inode->i_sb,
-						     bh, EXT4_JTR_NONE);
+		err = ext4_journal_get_create_access(handle, bh);
 		if (err) {
 			unlock_buffer(bh);
 			goto failed;
@@ -430,8 +429,7 @@ static int ext4_splice_branch(handle_t *handle,
 	 */
 	if (where->bh) {
 		BUFFER_TRACE(where->bh, "get_write_access");
-		err = ext4_journal_get_write_access(handle, ar->inode->i_sb,
-						    where->bh, EXT4_JTR_NONE);
+		err = ext4_journal_get_write_access(handle, where->bh);
 		if (err)
 			goto err_out;
 	}
@@ -536,8 +534,8 @@ int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
 	ext4_fsblk_t first_block = 0;
 
 	trace_ext4_ind_map_blocks_enter(inode, map->m_lblk, map->m_len, flags);
-	ASSERT(!(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)));
-	ASSERT(handle != NULL || (flags & EXT4_GET_BLOCKS_CREATE) == 0);
+	J_ASSERT(!(ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)));
+	J_ASSERT(handle != NULL || (flags & EXT4_GET_BLOCKS_CREATE) == 0);
 	depth = ext4_block_to_path(inode, map->m_lblk, offsets,
 				   &blocks_to_boundary);
 
@@ -707,7 +705,7 @@ static int ext4_ind_trunc_restart_fn(handle_t *handle, struct inode *inode,
 
 /*
  * Truncate transactions can be complex and absolutely huge.  So we need to
- * be able to restart the transaction at a convenient checkpoint to make
+ * be able to restart the transaction at a conventient checkpoint to make
  * sure we don't overflow the journal.
  *
  * Try to extend this transaction for the purposes of truncation.  If
@@ -730,8 +728,7 @@ static int ext4_ind_truncate_ensure_credits(handle_t *handle,
 		return ret;
 	if (bh) {
 		BUFFER_TRACE(bh, "retaking write access");
-		ret = ext4_journal_get_write_access(handle, inode->i_sb, bh,
-						    EXT4_JTR_NONE);
+		ret = ext4_journal_get_write_access(handle, bh);
 		if (unlikely(ret))
 			return ret;
 	}
@@ -919,8 +916,7 @@ static void ext4_free_data(handle_t *handle, struct inode *inode,
 
 	if (this_bh) {				/* For indirect block */
 		BUFFER_TRACE(this_bh, "get_write_access");
-		err = ext4_journal_get_write_access(handle, inode->i_sb,
-						    this_bh, EXT4_JTR_NONE);
+		err = ext4_journal_get_write_access(handle, this_bh);
 		/* Important: if we can't update the indirect pointers
 		 * to the blocks, we can't free them. */
 		if (err)
@@ -1083,8 +1079,7 @@ static void ext4_free_branches(handle_t *handle, struct inode *inode,
 				 */
 				BUFFER_TRACE(parent_bh, "get_write_access");
 				if (!ext4_journal_get_write_access(handle,
-						inode->i_sb, parent_bh,
-						EXT4_JTR_NONE)) {
+								   parent_bh)){
 					*p = 0;
 					BUFFER_TRACE(parent_bh,
 					"call ext4_handle_dirty_metadata");

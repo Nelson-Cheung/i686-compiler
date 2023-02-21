@@ -200,7 +200,6 @@ int irq_gc_set_wake(struct irq_data *d, unsigned int on)
 	irq_gc_unlock(gc);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(irq_gc_set_wake);
 
 static u32 irq_readl_be(void __iomem *addr)
 {
@@ -240,8 +239,9 @@ irq_alloc_generic_chip(const char *name, int num_ct, unsigned int irq_base,
 		       void __iomem *reg_base, irq_flow_handler_t handler)
 {
 	struct irq_chip_generic *gc;
+	unsigned long sz = sizeof(*gc) + num_ct * sizeof(struct irq_chip_type);
 
-	gc = kzalloc(struct_size(gc, chip_types, num_ct), GFP_KERNEL);
+	gc = kzalloc(sz, GFP_KERNEL);
 	if (gc) {
 		irq_init_generic_chip(gc, name, num_ct, irq_base, reg_base,
 				      handler);
@@ -269,7 +269,7 @@ irq_gc_init_mask_cache(struct irq_chip_generic *gc, enum irq_gc_flags flags)
 }
 
 /**
- * __irq_alloc_domain_generic_chips - Allocate generic chips for an irq domain
+ * __irq_alloc_domain_generic_chip - Allocate generic chips for an irq domain
  * @d:			irq domain for which to allocate chips
  * @irqs_per_chip:	Number of interrupts each chip handles (max 32)
  * @num_ct:		Number of irq_chip_type instances associated with this
@@ -287,11 +287,8 @@ int __irq_alloc_domain_generic_chips(struct irq_domain *d, int irqs_per_chip,
 {
 	struct irq_domain_chip_generic *dgc;
 	struct irq_chip_generic *gc;
+	int numchips, sz, i;
 	unsigned long flags;
-	int numchips, i;
-	size_t dgc_sz;
-	size_t gc_sz;
-	size_t sz;
 	void *tmp;
 
 	if (d->gc)
@@ -302,9 +299,8 @@ int __irq_alloc_domain_generic_chips(struct irq_domain *d, int irqs_per_chip,
 		return -EINVAL;
 
 	/* Allocate a pointer, generic chip and chiptypes for each chip */
-	gc_sz = struct_size(gc, chip_types, num_ct);
-	dgc_sz = struct_size(dgc, gc, numchips);
-	sz = dgc_sz + numchips * gc_sz;
+	sz = sizeof(*dgc) + numchips * sizeof(gc);
+	sz += numchips * (sizeof(*gc) + num_ct * sizeof(struct irq_chip_type));
 
 	tmp = dgc = kzalloc(sz, GFP_KERNEL);
 	if (!dgc)
@@ -317,7 +313,7 @@ int __irq_alloc_domain_generic_chips(struct irq_domain *d, int irqs_per_chip,
 	d->gc = dgc;
 
 	/* Calc pointer to the first generic chip */
-	tmp += dgc_sz;
+	tmp += sizeof(*dgc) + numchips * sizeof(gc);
 	for (i = 0; i < numchips; i++) {
 		/* Store the pointer to the generic chip */
 		dgc->gc[i] = gc = tmp;
@@ -334,7 +330,7 @@ int __irq_alloc_domain_generic_chips(struct irq_domain *d, int irqs_per_chip,
 		list_add_tail(&gc->list, &gc_list);
 		raw_spin_unlock_irqrestore(&gc_lock, flags);
 		/* Calc pointer to the next generic chip */
-		tmp += gc_sz;
+		tmp += sizeof(*gc) + num_ct * sizeof(struct irq_chip_type);
 	}
 	return 0;
 }

@@ -80,30 +80,30 @@ $(obj)/vmlinux.bin.xz: $(obj)/vmlinux.bin FORCE
 $(obj)/vmlinux.bin.lzo: $(obj)/vmlinux.bin FORCE
 	$(call if_changed,lzo)
 
-$(obj)/uImage.bz2: $(obj)/vmlinux.bin.bz2 FORCE
+$(obj)/uImage.bz2: $(obj)/vmlinux.bin.bz2
 	$(call if_changed,uimage,bzip2)
 
-$(obj)/uImage.gz: $(obj)/vmlinux.bin.gz FORCE
+$(obj)/uImage.gz: $(obj)/vmlinux.bin.gz
 	$(call if_changed,uimage,gzip)
 
-$(obj)/uImage.lzma: $(obj)/vmlinux.bin.lzma FORCE
+$(obj)/uImage.lzma: $(obj)/vmlinux.bin.lzma
 	$(call if_changed,uimage,lzma)
 
-$(obj)/uImage.xz: $(obj)/vmlinux.bin.xz FORCE
+$(obj)/uImage.xz: $(obj)/vmlinux.bin.xz
 	$(call if_changed,uimage,xz)
 
-$(obj)/uImage.lzo: $(obj)/vmlinux.bin.lzo FORCE
+$(obj)/uImage.lzo: $(obj)/vmlinux.bin.lzo
 	$(call if_changed,uimage,lzo)
 
-$(obj)/uImage.bin: $(obj)/vmlinux.bin FORCE
+$(obj)/uImage.bin: $(obj)/vmlinux.bin
 	$(call if_changed,uimage,none)
 
 OBJCOPYFLAGS_vmlinux.srec := -I binary -O srec
-$(obj)/vmlinux.srec: $(obj)/compressed/vmlinux FORCE
+$(obj)/vmlinux.srec: $(obj)/compressed/vmlinux
 	$(call if_changed,objcopy)
 
 OBJCOPYFLAGS_uImage.srec := -I binary -O srec
-$(obj)/uImage.srec: $(obj)/uImage FORCE
+$(obj)/uImage.srec: $(obj)/uImage
 	$(call if_changed,objcopy)
 
 $(obj)/uImage: $(obj)/uImage.$(suffix-y)

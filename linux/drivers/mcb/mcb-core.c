@@ -77,7 +77,7 @@ static int mcb_probe(struct device *dev)
 	return ret;
 }
 
-static void mcb_remove(struct device *dev)
+static int mcb_remove(struct device *dev)
 {
 	struct mcb_driver *mdrv = to_mcb_driver(dev->driver);
 	struct mcb_device *mdev = to_mcb_device(dev);
@@ -89,6 +89,8 @@ static void mcb_remove(struct device *dev)
 	module_put(carrier_mod);
 
 	put_device(&mdev->dev);
+
+	return 0;
 }
 
 static void mcb_shutdown(struct device *dev)
@@ -275,8 +277,8 @@ struct mcb_bus *mcb_alloc_bus(struct device *carrier)
 
 	bus_nr = ida_simple_get(&mcb_ida, 0, 0, GFP_KERNEL);
 	if (bus_nr < 0) {
-		kfree(bus);
-		return ERR_PTR(bus_nr);
+		rc = bus_nr;
+		goto err_free;
 	}
 
 	bus->bus_nr = bus_nr;
@@ -291,12 +293,12 @@ struct mcb_bus *mcb_alloc_bus(struct device *carrier)
 	dev_set_name(&bus->dev, "mcb:%d", bus_nr);
 	rc = device_add(&bus->dev);
 	if (rc)
-		goto err_put;
+		goto err_free;
 
 	return bus;
-
-err_put:
-	put_device(&bus->dev);
+err_free:
+	put_device(carrier);
+	kfree(bus);
 	return ERR_PTR(rc);
 }
 EXPORT_SYMBOL_NS_GPL(mcb_alloc_bus, MCB);

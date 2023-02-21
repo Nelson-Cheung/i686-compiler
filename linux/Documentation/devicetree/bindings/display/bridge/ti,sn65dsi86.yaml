@@ -18,7 +18,7 @@ properties:
     const: ti,sn65dsi86
 
   reg:
-    enum: [ 0x2c, 0x2d ]
+    const: 0x2d
 
   enable-gpios:
     maxItems: 1
@@ -70,30 +70,55 @@ properties:
     const: 1
     description: See ../../pwm/pwm.yaml for description of the cell formats.
 
-  aux-bus:
-    $ref: /schemas/display/dp-aux-bus.yaml#
-
   ports:
-    $ref: /schemas/graph.yaml#/properties/ports
+    type: object
+    additionalProperties: false
 
     properties:
+      "#address-cells":
+        const: 1
+
+      "#size-cells":
+        const: 0
+
       port@0:
-        $ref: /schemas/graph.yaml#/properties/port
+        type: object
+        additionalProperties: false
+
         description:
           Video port for MIPI DSI input
 
+        properties:
+          reg:
+            const: 0
+
+          endpoint:
+            type: object
+            additionalProperties: false
+            properties:
+              remote-endpoint: true
+
+        required:
+          - reg
+
       port@1:
-        $ref: /schemas/graph.yaml#/$defs/port-base
-        unevaluatedProperties: false
+        type: object
+        additionalProperties: false
+
         description:
           Video port for eDP output (panel or connector).
 
         properties:
+          reg:
+            const: 1
+
           endpoint:
-            $ref: /schemas/graph.yaml#/$defs/endpoint-base
-            unevaluatedProperties: false
+            type: object
+            additionalProperties: false
 
             properties:
+              remote-endpoint: true
+
               data-lanes:
                 oneOf:
                   - minItems: 1
@@ -146,13 +171,19 @@ properties:
             dependencies:
               lane-polarities: [data-lanes]
 
+        required:
+          - reg
+
     required:
+      - "#address-cells"
+      - "#size-cells"
       - port@0
       - port@1
 
 required:
   - compatible
   - reg
+  - enable-gpios
   - vccio-supply
   - vpll-supply
   - vcca-supply
@@ -203,23 +234,8 @@ examples:
 
           port@1 {
             reg = <1>;
-            sn65dsi86_out: endpoint {
+            endpoint {
               remote-endpoint = <&panel_in_edp>;
-            };
-          };
-        };
-
-        aux-bus {
-          panel {
-            compatible = "boe,nv133fhm-n62";
-            power-supply = <&pp3300_dx_edp>;
-            backlight = <&backlight>;
-            hpd-gpios = <&sn65dsi86_bridge 2 GPIO_ACTIVE_HIGH>;
-
-            port {
-              panel_in_edp: endpoint {
-                remote-endpoint = <&sn65dsi86_out>;
-              };
             };
           };
         };

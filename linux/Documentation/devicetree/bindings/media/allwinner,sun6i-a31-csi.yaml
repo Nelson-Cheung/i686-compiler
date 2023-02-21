@@ -40,15 +40,17 @@ properties:
   resets:
     maxItems: 1
 
+  # See ./video-interfaces.txt for details
   port:
-    $ref: /schemas/graph.yaml#/$defs/port-base
+    type: object
 
     properties:
       endpoint:
-        $ref: video-interfaces.yaml#
-        unevaluatedProperties: false
+        type: object
 
         properties:
+          remote-endpoint: true
+
           bus-width:
             enum: [ 8, 10, 12, 16 ]
 
@@ -58,6 +60,10 @@ properties:
 
         required:
           - bus-width
+          - remote-endpoint
+
+    required:
+      - endpoint
 
     additionalProperties: false
 

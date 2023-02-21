@@ -263,11 +263,7 @@ static FORCE_INLINE int LZ4_decompress_generic(
 				}
 			}
 
-			/*
-			 * supports overlapping memory regions; only matters
-			 * for in-place decompression scenarios
-			 */
-			LZ4_memmove(op, ip, length);
+			LZ4_memcpy(op, ip, length);
 			ip += length;
 			op += length;
 
@@ -481,7 +477,7 @@ int LZ4_decompress_fast(const char *source, char *dest, int originalSize)
 
 /* ===== Instantiate a few more decoding cases, used more than once. ===== */
 
-static int LZ4_decompress_safe_withPrefix64k(const char *source, char *dest,
+int LZ4_decompress_safe_withPrefix64k(const char *source, char *dest,
 				      int compressedSize, int maxOutputSize)
 {
 	return LZ4_decompress_generic(source, dest,

@@ -6,7 +6,7 @@
  */
 
 #include "dm-core.h"
-#include "dm-ima.h"
+
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/miscdevice.h>
@@ -14,13 +14,11 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
-#include <linux/rbtree.h>
 #include <linux/dm-ioctl.h>
 #include <linux/hdreg.h>
 #include <linux/compat.h>
 
 #include <linux/uaccess.h>
-#include <linux/ima.h>
 
 #define DM_MSG_PREFIX "ioctl"
 #define DM_DRIVER_EMAIL "dm-devel@redhat.com"
@@ -38,10 +36,8 @@ struct dm_file {
  * name or uuid.
  *---------------------------------------------------------------*/
 struct hash_cell {
-	struct rb_node name_node;
-	struct rb_node uuid_node;
-	bool name_set;
-	bool uuid_set;
+	struct list_head name_list;
+	struct list_head uuid_list;
 
 	char *name;
 	char *uuid;
@@ -57,8 +53,10 @@ struct vers_iter {
 };
 
 
-static struct rb_root name_rb_tree = RB_ROOT;
-static struct rb_root uuid_rb_tree = RB_ROOT;
+#define NUM_BUCKETS 64
+#define MASK_BUCKETS (NUM_BUCKETS - 1)
+static struct list_head _name_buckets[NUM_BUCKETS];
+static struct list_head _uuid_buckets[NUM_BUCKETS];
 
 static void dm_hash_remove_all(bool keep_open_devices, bool mark_deferred, bool only_deferred);
 
@@ -72,9 +70,40 @@ static DECLARE_RWSEM(_hash_lock);
  */
 static DEFINE_MUTEX(dm_hash_cells_mutex);
 
+static void init_buckets(struct list_head *buckets)
+{
+	unsigned int i;
+
+	for (i = 0; i < NUM_BUCKETS; i++)
+		INIT_LIST_HEAD(buckets + i);
+}
+
+static int dm_hash_init(void)
+{
+	init_buckets(_name_buckets);
+	init_buckets(_uuid_buckets);
+	return 0;
+}
+
 static void dm_hash_exit(void)
 {
 	dm_hash_remove_all(false, false, false);
+}
+
+/*-----------------------------------------------------------------
+ * Hash function:
+ * We're not really concerned with the str hash function being
+ * fast since it's only used by the ioctl interface.
+ *---------------------------------------------------------------*/
+static unsigned int hash_str(const char *str)
+{
+	const unsigned int hash_mult = 2654435387U;
+	unsigned int h = 0;
+
+	while (*str)
+		h = (h + (unsigned int) *str++) * hash_mult;
+
+	return h & MASK_BUCKETS;
 }
 
 /*-----------------------------------------------------------------
@@ -82,98 +111,30 @@ static void dm_hash_exit(void)
  *---------------------------------------------------------------*/
 static struct hash_cell *__get_name_cell(const char *str)
 {
-	struct rb_node *n = name_rb_tree.rb_node;
+	struct hash_cell *hc;
+	unsigned int h = hash_str(str);
 
-	while (n) {
-		struct hash_cell *hc = container_of(n, struct hash_cell, name_node);
-		int c = strcmp(hc->name, str);
-		if (!c) {
+	list_for_each_entry (hc, _name_buckets + h, name_list)
+		if (!strcmp(hc->name, str)) {
 			dm_get(hc->md);
 			return hc;
 		}
-		n = c >= 0 ? n->rb_left : n->rb_right;
-	}
 
 	return NULL;
 }
 
 static struct hash_cell *__get_uuid_cell(const char *str)
 {
-	struct rb_node *n = uuid_rb_tree.rb_node;
+	struct hash_cell *hc;
+	unsigned int h = hash_str(str);
 
-	while (n) {
-		struct hash_cell *hc = container_of(n, struct hash_cell, uuid_node);
-		int c = strcmp(hc->uuid, str);
-		if (!c) {
+	list_for_each_entry (hc, _uuid_buckets + h, uuid_list)
+		if (!strcmp(hc->uuid, str)) {
 			dm_get(hc->md);
 			return hc;
 		}
-		n = c >= 0 ? n->rb_left : n->rb_right;
-	}
 
 	return NULL;
-}
-
-static void __unlink_name(struct hash_cell *hc)
-{
-	if (hc->name_set) {
-		hc->name_set = false;
-		rb_erase(&hc->name_node, &name_rb_tree);
-	}
-}
-
-static void __unlink_uuid(struct hash_cell *hc)
-{
-	if (hc->uuid_set) {
-		hc->uuid_set = false;
-		rb_erase(&hc->uuid_node, &uuid_rb_tree);
-	}
-}
-
-static void __link_name(struct hash_cell *new_hc)
-{
-	struct rb_node **n, *parent;
-
-	__unlink_name(new_hc);
-
-	new_hc->name_set = true;
-
-	n = &name_rb_tree.rb_node;
-	parent = NULL;
-
-	while (*n) {
-		struct hash_cell *hc = container_of(*n, struct hash_cell, name_node);
-		int c = strcmp(hc->name, new_hc->name);
-		BUG_ON(!c);
-		parent = *n;
-		n = c >= 0 ? &hc->name_node.rb_left : &hc->name_node.rb_right;
-	}
-
-	rb_link_node(&new_hc->name_node, parent, n);
-	rb_insert_color(&new_hc->name_node, &name_rb_tree);
-}
-
-static void __link_uuid(struct hash_cell *new_hc)
-{
-	struct rb_node **n, *parent;
-
-	__unlink_uuid(new_hc);
-
-	new_hc->uuid_set = true;
-
-	n = &uuid_rb_tree.rb_node;
-	parent = NULL;
-
-	while (*n) {
-		struct hash_cell *hc = container_of(*n, struct hash_cell, uuid_node);
-		int c = strcmp(hc->uuid, new_hc->uuid);
-		BUG_ON(!c);
-		parent = *n;
-		n = c > 0 ? &hc->uuid_node.rb_left : &hc->uuid_node.rb_right;
-	}
-
-	rb_link_node(&new_hc->uuid_node, parent, n);
-	rb_insert_color(&new_hc->uuid_node, &uuid_rb_tree);
 }
 
 static struct hash_cell *__get_dev_cell(uint64_t dev)
@@ -224,7 +185,8 @@ static struct hash_cell *alloc_cell(const char *name, const char *uuid,
 		}
 	}
 
-	hc->name_set = hc->uuid_set = false;
+	INIT_LIST_HEAD(&hc->name_list);
+	INIT_LIST_HEAD(&hc->uuid_list);
 	hc->md = md;
 	hc->new_map = NULL;
 	return hc;
@@ -264,16 +226,16 @@ static int dm_hash_insert(const char *name, const char *uuid, struct mapped_devi
 		goto bad;
 	}
 
-	__link_name(cell);
+	list_add(&cell->name_list, _name_buckets + hash_str(name));
 
 	if (uuid) {
 		hc = __get_uuid_cell(uuid);
 		if (hc) {
-			__unlink_name(cell);
+			list_del(&cell->name_list);
 			dm_put(hc->md);
 			goto bad;
 		}
-		__link_uuid(cell);
+		list_add(&cell->uuid_list, _uuid_buckets + hash_str(uuid));
 	}
 	dm_get(md);
 	mutex_lock(&dm_hash_cells_mutex);
@@ -294,9 +256,9 @@ static struct dm_table *__hash_remove(struct hash_cell *hc)
 	struct dm_table *table;
 	int srcu_idx;
 
-	/* remove from the dev trees */
-	__unlink_name(hc);
-	__unlink_uuid(hc);
+	/* remove from the dev hash */
+	list_del(&hc->uuid_list);
+	list_del(&hc->name_list);
 	mutex_lock(&dm_hash_cells_mutex);
 	dm_set_mdptr(hc->md, NULL);
 	mutex_unlock(&dm_hash_cells_mutex);
@@ -317,8 +279,7 @@ static struct dm_table *__hash_remove(struct hash_cell *hc)
 
 static void dm_hash_remove_all(bool keep_open_devices, bool mark_deferred, bool only_deferred)
 {
-	int dev_skipped;
-	struct rb_node *n;
+	int i, dev_skipped;
 	struct hash_cell *hc;
 	struct mapped_device *md;
 	struct dm_table *t;
@@ -328,40 +289,40 @@ retry:
 
 	down_write(&_hash_lock);
 
-	for (n = rb_first(&name_rb_tree); n; n = rb_next(n)) {
-		hc = container_of(n, struct hash_cell, name_node);
-		md = hc->md;
-		dm_get(md);
+	for (i = 0; i < NUM_BUCKETS; i++) {
+		list_for_each_entry(hc, _name_buckets + i, name_list) {
+			md = hc->md;
+			dm_get(md);
 
-		if (keep_open_devices &&
-		    dm_lock_for_deletion(md, mark_deferred, only_deferred)) {
+			if (keep_open_devices &&
+			    dm_lock_for_deletion(md, mark_deferred, only_deferred)) {
+				dm_put(md);
+				dev_skipped++;
+				continue;
+			}
+
+			t = __hash_remove(hc);
+
+			up_write(&_hash_lock);
+
+			if (t) {
+				dm_sync_table(md);
+				dm_table_destroy(t);
+			}
 			dm_put(md);
-			dev_skipped++;
-			continue;
+			if (likely(keep_open_devices))
+				dm_destroy(md);
+			else
+				dm_destroy_immediate(md);
+
+			/*
+			 * Some mapped devices may be using other mapped
+			 * devices, so repeat until we make no further
+			 * progress.  If a new mapped device is created
+			 * here it will also get removed.
+			 */
+			goto retry;
 		}
-
-		t = __hash_remove(hc);
-
-		up_write(&_hash_lock);
-
-		if (t) {
-			dm_sync_table(md);
-			dm_table_destroy(t);
-		}
-		dm_ima_measure_on_device_remove(md, true);
-		dm_put(md);
-		if (likely(keep_open_devices))
-			dm_destroy(md);
-		else
-			dm_destroy_immediate(md);
-
-		/*
-		 * Some mapped devices may be using other mapped
-		 * devices, so repeat until we make no further
-		 * progress.  If a new mapped device is created
-		 * here it will also get removed.
-		 */
-		goto retry;
 	}
 
 	up_write(&_hash_lock);
@@ -379,7 +340,7 @@ static void __set_cell_uuid(struct hash_cell *hc, char *new_uuid)
 	hc->uuid = new_uuid;
 	mutex_unlock(&dm_hash_cells_mutex);
 
-	__link_uuid(hc);
+	list_add(&hc->uuid_list, _uuid_buckets + hash_str(new_uuid));
 }
 
 /*
@@ -393,14 +354,14 @@ static char *__change_cell_name(struct hash_cell *hc, char *new_name)
 	/*
 	 * Rename and move the name cell.
 	 */
-	__unlink_name(hc);
+	list_del(&hc->name_list);
 	old_name = hc->name;
 
 	mutex_lock(&dm_hash_cells_mutex);
 	hc->name = new_name;
 	mutex_unlock(&dm_hash_cells_mutex);
 
-	__link_name(hc);
+	list_add(&hc->name_list, _name_buckets + hash_str(new_name));
 
 	return old_name;
 }
@@ -485,9 +446,6 @@ static struct mapped_device *dm_hash_rename(struct dm_ioctl *param,
 		param->flags |= DM_UEVENT_GENERATED_FLAG;
 
 	md = hc->md;
-
-	dm_ima_measure_on_device_rename(md);
-
 	up_write(&_hash_lock);
 	kfree(old_name);
 
@@ -545,33 +503,9 @@ static void *get_result_buffer(struct dm_ioctl *param, size_t param_size,
 	return ((void *) param) + param->data_start;
 }
 
-static bool filter_device(struct hash_cell *hc, const char *pfx_name, const char *pfx_uuid)
-{
-	const char *val;
-	size_t val_len, pfx_len;
-
-	val = hc->name;
-	val_len = strlen(val);
-	pfx_len = strnlen(pfx_name, DM_NAME_LEN);
-	if (pfx_len > val_len)
-		return false;
-	if (memcmp(val, pfx_name, pfx_len))
-		return false;
-
-	val = hc->uuid ? hc->uuid : "";
-	val_len = strlen(val);
-	pfx_len = strnlen(pfx_uuid, DM_UUID_LEN);
-	if (pfx_len > val_len)
-		return false;
-	if (memcmp(val, pfx_uuid, pfx_len))
-		return false;
-
-	return true;
-}
-
 static int list_devices(struct file *filp, struct dm_ioctl *param, size_t param_size)
 {
-	struct rb_node *n;
+	unsigned int i;
 	struct hash_cell *hc;
 	size_t len, needed = 0;
 	struct gendisk *disk;
@@ -584,21 +518,18 @@ static int list_devices(struct file *filp, struct dm_ioctl *param, size_t param_
 	 * Loop through all the devices working out how much
 	 * space we need.
 	 */
-	for (n = rb_first(&name_rb_tree); n; n = rb_next(n)) {
-		hc = container_of(n, struct hash_cell, name_node);
-		if (!filter_device(hc, param->name, param->uuid))
-			continue;
-		needed += align_val(offsetof(struct dm_name_list, name) + strlen(hc->name) + 1);
-		needed += align_val(sizeof(uint32_t) * 2);
-		if (param->flags & DM_UUID_FLAG && hc->uuid)
-			needed += align_val(strlen(hc->uuid) + 1);
+	for (i = 0; i < NUM_BUCKETS; i++) {
+		list_for_each_entry (hc, _name_buckets + i, name_list) {
+			needed += align_val(offsetof(struct dm_name_list, name) + strlen(hc->name) + 1);
+			needed += align_val(sizeof(uint32_t));
+		}
 	}
 
 	/*
 	 * Grab our output buffer.
 	 */
 	nl = orig_nl = get_result_buffer(param, param_size, &len);
-	if (len < needed || len < sizeof(nl->dev)) {
+	if (len < needed) {
 		param->flags |= DM_BUFFER_FULL_FLAG;
 		goto out;
 	}
@@ -609,34 +540,21 @@ static int list_devices(struct file *filp, struct dm_ioctl *param, size_t param_
 	/*
 	 * Now loop through filling out the names.
 	 */
-	for (n = rb_first(&name_rb_tree); n; n = rb_next(n)) {
-		void *uuid_ptr;
-		hc = container_of(n, struct hash_cell, name_node);
-		if (!filter_device(hc, param->name, param->uuid))
-			continue;
-		if (old_nl)
-			old_nl->next = (uint32_t) ((void *) nl -
-						   (void *) old_nl);
-		disk = dm_disk(hc->md);
-		nl->dev = huge_encode_dev(disk_devt(disk));
-		nl->next = 0;
-		strcpy(nl->name, hc->name);
+	for (i = 0; i < NUM_BUCKETS; i++) {
+		list_for_each_entry (hc, _name_buckets + i, name_list) {
+			if (old_nl)
+				old_nl->next = (uint32_t) ((void *) nl -
+							   (void *) old_nl);
+			disk = dm_disk(hc->md);
+			nl->dev = huge_encode_dev(disk_devt(disk));
+			nl->next = 0;
+			strcpy(nl->name, hc->name);
 
-		old_nl = nl;
-		event_nr = align_ptr(nl->name + strlen(hc->name) + 1);
-		event_nr[0] = dm_get_event_nr(hc->md);
-		event_nr[1] = 0;
-		uuid_ptr = align_ptr(event_nr + 2);
-		if (param->flags & DM_UUID_FLAG) {
-			if (hc->uuid) {
-				event_nr[1] |= DM_NAME_LIST_FLAG_HAS_UUID;
-				strcpy(uuid_ptr, hc->uuid);
-				uuid_ptr = align_ptr(uuid_ptr + strlen(hc->uuid) + 1);
-			} else {
-				event_nr[1] |= DM_NAME_LIST_FLAG_DOESNT_HAVE_UUID;
-			}
+			old_nl = nl;
+			event_nr = align_ptr(nl->name + strlen(hc->name) + 1);
+			*event_nr = dm_get_event_nr(hc->md);
+			nl = align_ptr(event_nr + 1);
 		}
-		nl = uuid_ptr;
 	}
 	/*
 	 * If mismatch happens, security may be compromised due to buffer
@@ -986,8 +904,6 @@ static int dev_remove(struct file *filp, struct dm_ioctl *param, size_t param_si
 
 	param->flags &= ~DM_DEFERRED_REMOVE;
 
-	dm_ima_measure_on_device_remove(md, false);
-
 	if (!dm_kobject_uevent(md, KOBJ_REMOVE, param->event_nr))
 		param->flags |= DM_UEVENT_GENERATED_FLAG;
 
@@ -1166,12 +1082,8 @@ static int do_resume(struct dm_ioctl *param)
 
 	if (dm_suspended_md(md)) {
 		r = dm_resume(md);
-		if (!r) {
-			dm_ima_measure_on_device_resume(md, new_map ? true : false);
-
-			if (!dm_kobject_uevent(md, KOBJ_CHANGE, param->event_nr))
-				param->flags |= DM_UEVENT_GENERATED_FLAG;
-		}
+		if (!r && !dm_kobject_uevent(md, KOBJ_CHANGE, param->event_nr))
+			param->flags |= DM_UEVENT_GENERATED_FLAG;
 	}
 
 	/*
@@ -1235,8 +1147,6 @@ static void retrieve_status(struct dm_table *table,
 
 	if (param->flags & DM_STATUS_TABLE_FLAG)
 		type = STATUSTYPE_TABLE;
-	else if (param->flags & DM_IMA_MEASUREMENT_FLAG)
-		type = STATUSTYPE_IMA;
 	else
 		type = STATUSTYPE_INFO;
 
@@ -1438,8 +1348,6 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 	if (r)
 		goto err_unlock_md_type;
 
-	dm_ima_measure_on_table_load(t, STATUSTYPE_IMA);
-
 	immutable_target_type = dm_get_immutable_target_type(md);
 	if (immutable_target_type &&
 	    (immutable_target_type != dm_table_get_immutable_target_type(t)) &&
@@ -1451,6 +1359,9 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 	}
 
 	if (dm_get_md_type(md) == DM_TYPE_NONE) {
+		/* Initial table load: acquire type of table. */
+		dm_set_md_type(md, dm_table_get_type(t));
+
 		/* setup md->queue to reflect md's type (may block) */
 		r = dm_setup_md_queue(md, t);
 		if (r) {
@@ -1508,7 +1419,6 @@ static int table_clear(struct file *filp, struct dm_ioctl *param, size_t param_s
 	struct hash_cell *hc;
 	struct mapped_device *md;
 	struct dm_table *old_map = NULL;
-	bool has_new_map = false;
 
 	down_write(&_hash_lock);
 
@@ -1522,7 +1432,6 @@ static int table_clear(struct file *filp, struct dm_ioctl *param, size_t param_s
 	if (hc->new_map) {
 		old_map = hc->new_map;
 		hc->new_map = NULL;
-		has_new_map = true;
 	}
 
 	param->flags &= ~DM_INACTIVE_PRESENT_FLAG;
@@ -1534,7 +1443,6 @@ static int table_clear(struct file *filp, struct dm_ioctl *param, size_t param_s
 		dm_sync_table(md);
 		dm_table_destroy(old_map);
 	}
-	dm_ima_measure_on_table_clear(md, has_new_map);
 	dm_put(md);
 
 	return 0;
@@ -1692,7 +1600,6 @@ static int target_message(struct file *filp, struct dm_ioctl *param, size_t para
 
 	if (!argc) {
 		DMWARN("Empty message received.");
-		r = -EINVAL;
 		goto out_argv;
 	}
 
@@ -2083,9 +1990,14 @@ int __init dm_interface_init(void)
 {
 	int r;
 
+	r = dm_hash_init();
+	if (r)
+		return r;
+
 	r = misc_register(&_dm_misc);
 	if (r) {
 		DMERR("misc_register failed for control device");
+		dm_hash_exit();
 		return r;
 	}
 
@@ -2202,6 +2114,7 @@ int __init dm_early_create(struct dm_ioctl *dmi,
 	if (r)
 		goto err_destroy_table;
 
+	md->type = dm_table_get_type(t);
 	/* setup md->queue to reflect md's type (may block) */
 	r = dm_setup_md_queue(md, t);
 	if (r) {

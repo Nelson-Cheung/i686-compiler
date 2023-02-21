@@ -101,7 +101,6 @@ struct pcpu_secy_stats {
  * @real_dev: pointer to underlying netdevice
  * @stats: MACsec device stats
  * @secys: linked list of SecY's on the underlying device
- * @gro_cells: pointer to the Generic Receive Offload cell
  * @offload: status of offloading on the MACsec device
  */
 struct macsec_dev {
@@ -1819,7 +1818,7 @@ static int macsec_add_rxsa(struct sk_buff *skb, struct genl_info *info)
 		ctx.sa.rx_sa = rx_sa;
 		ctx.secy = secy;
 		memcpy(ctx.sa.key, nla_data(tb_sa[MACSEC_SA_ATTR_KEY]),
-		       secy->key_len);
+		       MACSEC_KEYID_LEN);
 
 		err = macsec_offload(ops->mdo_add_rxsa, &ctx);
 		if (err)
@@ -2061,7 +2060,7 @@ static int macsec_add_txsa(struct sk_buff *skb, struct genl_info *info)
 		ctx.sa.tx_sa = tx_sa;
 		ctx.secy = secy;
 		memcpy(ctx.sa.key, nla_data(tb_sa[MACSEC_SA_ATTR_KEY]),
-		       secy->key_len);
+		       MACSEC_KEYID_LEN);
 
 		err = macsec_offload(ops->mdo_add_txsa, &ctx);
 		if (err)

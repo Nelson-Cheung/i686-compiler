@@ -47,14 +47,11 @@ int mtk_vcodec_init_dec_pm(struct mtk_vcodec_dev *mtkdev)
 		dec_clk->clk_info = devm_kcalloc(&pdev->dev,
 			dec_clk->clk_num, sizeof(*clk_info),
 			GFP_KERNEL);
-		if (!dec_clk->clk_info) {
-			ret = -ENOMEM;
-			goto put_device;
-		}
+		if (!dec_clk->clk_info)
+			return -ENOMEM;
 	} else {
 		mtk_v4l2_err("Failed to get vdec clock count");
-		ret = -EINVAL;
-		goto put_device;
+		return -EINVAL;
 	}
 
 	for (i = 0; i < dec_clk->clk_num; i++) {
@@ -63,40 +60,34 @@ int mtk_vcodec_init_dec_pm(struct mtk_vcodec_dev *mtkdev)
 			"clock-names", i, &clk_info->clk_name);
 		if (ret) {
 			mtk_v4l2_err("Failed to get clock name id = %d", i);
-			goto put_device;
+			return ret;
 		}
 		clk_info->vcodec_clk = devm_clk_get(&pdev->dev,
 			clk_info->clk_name);
 		if (IS_ERR(clk_info->vcodec_clk)) {
 			mtk_v4l2_err("devm_clk_get (%d)%s fail", i,
 				clk_info->clk_name);
-			ret = PTR_ERR(clk_info->vcodec_clk);
-			goto put_device;
+			return PTR_ERR(clk_info->vcodec_clk);
 		}
 	}
 
 	pm_runtime_enable(&pdev->dev);
-	return 0;
-put_device:
-	put_device(pm->larbvdec);
+
 	return ret;
 }
 
 void mtk_vcodec_release_dec_pm(struct mtk_vcodec_dev *dev)
 {
 	pm_runtime_disable(dev->pm.dev);
-	put_device(dev->pm.larbvdec);
 }
 
-int mtk_vcodec_dec_pw_on(struct mtk_vcodec_pm *pm)
+void mtk_vcodec_dec_pw_on(struct mtk_vcodec_pm *pm)
 {
 	int ret;
 
-	ret = pm_runtime_resume_and_get(pm->dev);
+	ret = pm_runtime_get_sync(pm->dev);
 	if (ret)
-		mtk_v4l2_err("pm_runtime_resume_and_get fail %d", ret);
-
-	return ret;
+		mtk_v4l2_err("pm_runtime_get_sync fail %d", ret);
 }
 
 void mtk_vcodec_dec_pw_off(struct mtk_vcodec_pm *pm)

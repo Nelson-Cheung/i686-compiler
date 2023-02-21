@@ -90,7 +90,7 @@ On-line docs
       :Date: 2008
       :Keywords: patches, review process, types of submissions, basic rules, case studies
       :Description: This paper gives several experience values on what types of patches
-        there are and how likely they get merged.
+        there are and how likley they get merged.
       :Abstract:
         [...]. This paper examines some common problems for
         submitting larger changes and some strategies to avoid problems.
@@ -126,17 +126,15 @@ On-line docs
         describes how to write user-mode utilities for communicating with
         Card Services.
 
-    * Title: **The Linux Kernel Module Programming Guide**
+    * Title: **Linux Kernel Module Programming Guide**
 
-      :Author: Peter Jay Salzman, Michael Burian, Ori Pomerantz, Bob Mottram,
-        Jim Huang.
-      :URL: https://sysprog21.github.io/lkmpg/
-      :Date: 2021
+      :Author: Ori Pomerantz.
+      :URL: https://tldp.org/LDP/lkmpg/2.6/html/index.html
+      :Date: 2001
       :Keywords: modules, GPL book, /proc, ioctls, system calls,
         interrupt handlers .
-      :Description: A very nice GPL book on the topic of modules
-        programming. Lots of examples. Currently the new version is being
-        actively maintained at https://github.com/sysprog21/lkmpg.
+      :Description: Very nice 92 pages GPL book on the topic of modules
+        programming. Lots of examples.
 
     * Title: **Global spinlock list and usage**
 
@@ -330,7 +328,7 @@ On-line docs
         block devices, hardware interrupts, scsi, DMA, access to user memory,
         memory allocation, timers.
       :Description: A guide designed to help you get up to speed on the
-        concepts that are not intuitively obvious, and to document the internal
+        concepts that are not intuitevly obvious, and to document the internal
         structures of Linux.
 
     * Title: **Dynamic Kernels: Modularized Device Drivers**

@@ -7,7 +7,6 @@
  */
 /dts-v1/;
 #include "at91sam9260.dtsi"
-#include <dt-bindings/input/input.h>
 
 / {
 	model = "Atmel at91sam9260ek";
@@ -157,7 +156,7 @@
 		btn4 {
 			label = "Button 4";
 			gpios = <&pioA 31 GPIO_ACTIVE_LOW>;
-			linux,code = <KEY_PROG1>;
+			linux,code = <0x104>;
 			wakeup-source;
 		};
 	};

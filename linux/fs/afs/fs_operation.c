@@ -118,8 +118,6 @@ static void afs_prepare_vnode(struct afs_operation *op, struct afs_vnode_param *
 		vp->cb_break_before	= afs_calc_vnode_cb_break(vnode);
 		if (vnode->lock_state != AFS_VNODE_LOCK_NONE)
 			op->flags	|= AFS_OPERATION_CUR_ONLY;
-		if (vp->modification)
-			set_bit(AFS_VNODE_MODIFYING, &vnode->flags);
 	}
 
 	if (vp->fid.vnode)
@@ -183,13 +181,10 @@ void afs_wait_for_operation(struct afs_operation *op)
 		if (test_bit(AFS_SERVER_FL_IS_YFS, &op->server->flags) &&
 		    op->ops->issue_yfs_rpc)
 			op->ops->issue_yfs_rpc(op);
-		else if (op->ops->issue_afs_rpc)
-			op->ops->issue_afs_rpc(op);
 		else
-			op->ac.error = -ENOTSUPP;
+			op->ops->issue_afs_rpc(op);
 
-		if (op->call)
-			op->error = afs_wait_for_call_to_complete(op->call, &op->ac);
+		op->error = afs_wait_for_call_to_complete(op->call, &op->ac);
 	}
 
 	switch (op->error) {
@@ -200,10 +195,8 @@ void afs_wait_for_operation(struct afs_operation *op)
 	case -ECONNABORTED:
 		if (op->ops->aborted)
 			op->ops->aborted(op);
-		fallthrough;
+		break;
 	default:
-		if (op->ops->failed)
-			op->ops->failed(op);
 		break;
 	}
 
@@ -227,10 +220,6 @@ int afs_put_operation(struct afs_operation *op)
 
 	if (op->ops && op->ops->put)
 		op->ops->put(op);
-	if (op->file[0].modification)
-		clear_bit(AFS_VNODE_MODIFYING, &op->file[0].vnode->flags);
-	if (op->file[1].modification && op->file[1].vnode != op->file[0].vnode)
-		clear_bit(AFS_VNODE_MODIFYING, &op->file[1].vnode->flags);
 	if (op->file[0].put_vnode)
 		iput(&op->file[0].vnode->vfs_inode);
 	if (op->file[1].put_vnode)

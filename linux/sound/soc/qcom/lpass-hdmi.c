@@ -24,7 +24,7 @@ static int lpass_hdmi_daiops_hw_params(struct snd_pcm_substream *substream,
 	unsigned int rate = params_rate(params);
 	unsigned int channels = params_channels(params);
 	unsigned int ret;
-	int bitwidth;
+	unsigned int bitwidth;
 	unsigned int word_length;
 	unsigned int ch_sts_buf0;
 	unsigned int ch_sts_buf1;
@@ -183,6 +183,8 @@ static int lpass_hdmi_daiops_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 
 	ret = regmap_field_write(sstream_ctl->dp_staffing_en, LPASS_SSTREAM_DEFAULT_ENABLE);
+	if (ret)
+		return ret;
 
 	return ret;
 }
@@ -198,6 +200,8 @@ static int lpass_hdmi_daiops_prepare(struct snd_pcm_substream *substream,
 		return ret;
 
 	ret = regmap_field_write(drvdata->meta_ctl->mute, LPASS_MUTE_DISABLE);
+	if (ret)
+		return ret;
 
 	return ret;
 }

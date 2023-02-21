@@ -60,6 +60,9 @@
 #define LPAIF_I2SCTL_BITWIDTH_24	1
 #define LPAIF_I2SCTL_BITWIDTH_32	2
 
+#define LPAIF_BIT_CLK_DISABLE		0
+#define LPAIF_BIT_CLK_ENABLE		1
+
 #define LPAIF_I2SCTL_RESET_STATE	0x003C0004
 #define LPAIF_DMACTL_RESET_STATE	0x00200000
 
@@ -130,7 +133,7 @@
 #define	LPAIF_WRDMAPERCNT_REG(v, chan)	LPAIF_WRDMA_REG_ADDR(v, 0x14, (chan))
 
 #define LPAIF_INTFDMA_REG(v, chan, reg, dai_id)  \
-	((dai_id ==  LPASS_DP_RX) ? \
+		((v->dai_driver[dai_id].id ==  LPASS_DP_RX) ? \
 		LPAIF_HDMI_RDMA##reg##_REG(v, chan) : \
 		 LPAIF_RDMA##reg##_REG(v, chan))
 

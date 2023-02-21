@@ -706,7 +706,9 @@ static int nt35510_power_on(struct nt35510 *nt)
 	if (ret)
 		return ret;
 
-	nt35510_read_id(nt);
+	ret = nt35510_read_id(nt);
+	if (ret)
+		return ret;
 
 	/* Set up stuff in  manufacturer control, page 1 */
 	ret = nt35510_send_long(nt, dsi, MCS_CMD_MAUCCTR,
@@ -896,7 +898,8 @@ static int nt35510_probe(struct mipi_dsi_device *dsi)
 	 */
 	dsi->hs_rate = 349440000;
 	dsi->lp_rate = 9600000;
-	dsi->mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS;
+	dsi->mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS |
+		MIPI_DSI_MODE_EOT_PACKET;
 
 	/*
 	 * Every new incarnation of this display must have a unique

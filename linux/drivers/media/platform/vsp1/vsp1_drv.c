@@ -559,7 +559,15 @@ static int vsp1_device_init(struct vsp1_device *vsp1)
  */
 int vsp1_device_get(struct vsp1_device *vsp1)
 {
-	return pm_runtime_resume_and_get(vsp1->dev);
+	int ret;
+
+	ret = pm_runtime_get_sync(vsp1->dev);
+	if (ret < 0) {
+		pm_runtime_put_noidle(vsp1->dev);
+		return ret;
+	}
+
+	return 0;
 }
 
 /*
@@ -874,10 +882,8 @@ static int vsp1_probe(struct platform_device *pdev)
 	}
 
 done:
-	if (ret) {
+	if (ret)
 		pm_runtime_disable(&pdev->dev);
-		rcar_fcp_put(vsp1->fcp);
-	}
 
 	return ret;
 }

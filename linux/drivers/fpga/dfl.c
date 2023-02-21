@@ -10,7 +10,6 @@
  *   Wu Hao <hao.wu@intel.com>
  *   Xiao Guangrong <guangrong.xiao@linux.intel.com>
  */
-#include <linux/dfl.h>
 #include <linux/fpga-dfl.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
@@ -284,20 +283,23 @@ static int dfl_bus_probe(struct device *dev)
 	return ddrv->probe(ddev);
 }
 
-static void dfl_bus_remove(struct device *dev)
+static int dfl_bus_remove(struct device *dev)
 {
 	struct dfl_driver *ddrv = to_dfl_drv(dev->driver);
 	struct dfl_device *ddev = to_dfl_dev(dev);
 
 	if (ddrv->remove)
 		ddrv->remove(ddev);
+
+	return 0;
 }
 
 static int dfl_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
 	struct dfl_device *ddev = to_dfl_dev(dev);
 
-	return add_uevent_var(env, "MODALIAS=dfl:t%04Xf%04X",
+	/* The type has 4 valid bits and feature_id has 12 valid bits */
+	return add_uevent_var(env, "MODALIAS=dfl:t%01Xf%03X",
 			      ddev->type, ddev->feature_id);
 }
 
@@ -379,7 +381,6 @@ dfl_dev_add(struct dfl_feature_platform_data *pdata,
 
 	ddev->type = feature_dev_id_type(pdev);
 	ddev->feature_id = feature->id;
-	ddev->revision = feature->revision;
 	ddev->cdev = pdata->dfl_cdev;
 
 	/* add mmio resource */
@@ -716,7 +717,6 @@ struct build_feature_devs_info {
  */
 struct dfl_feature_info {
 	u16 fid;
-	u8 revision;
 	struct resource mmio_res;
 	void __iomem *ioaddr;
 	struct list_head node;
@@ -796,7 +796,6 @@ static int build_info_commit_dev(struct build_feature_devs_info *binfo)
 		/* save resource information for each feature */
 		feature->dev = fdev;
 		feature->id = finfo->fid;
-		feature->revision = finfo->revision;
 
 		/*
 		 * the FIU header feature has some fundamental functions (sriov
@@ -911,17 +910,19 @@ static void build_info_free(struct build_feature_devs_info *binfo)
 	devm_kfree(binfo->dev, binfo);
 }
 
-static inline u32 feature_size(u64 value)
+static inline u32 feature_size(void __iomem *start)
 {
-	u32 ofst = FIELD_GET(DFH_NEXT_HDR_OFST, value);
+	u64 v = readq(start + DFH);
+	u32 ofst = FIELD_GET(DFH_NEXT_HDR_OFST, v);
 	/* workaround for private features with invalid size, use 4K instead */
 	return ofst ? ofst : 4096;
 }
 
-static u16 feature_id(u64 value)
+static u16 feature_id(void __iomem *start)
 {
-	u16 id = FIELD_GET(DFH_ID, value);
-	u8 type = FIELD_GET(DFH_TYPE, value);
+	u64 v = readq(start + DFH);
+	u16 id = FIELD_GET(DFH_ID, v);
+	u8 type = FIELD_GET(DFH_TYPE, v);
 
 	if (type == DFH_TYPE_FIU)
 		return FEATURE_ID_FIU_HEADER;
@@ -1019,18 +1020,11 @@ create_feature_instance(struct build_feature_devs_info *binfo,
 {
 	unsigned int irq_base, nr_irqs;
 	struct dfl_feature_info *finfo;
-	u8 revision = 0;
 	int ret;
-	u64 v;
 
-	if (fid != FEATURE_ID_AFU) {
-		v = readq(binfo->ioaddr + ofst);
-		revision = FIELD_GET(DFH_REVISION, v);
-
-		/* read feature size and id if inputs are invalid */
-		size = size ? size : feature_size(v);
-		fid = fid ? fid : feature_id(v);
-	}
+	/* read feature size and id if inputs are invalid */
+	size = size ? size : feature_size(binfo->ioaddr + ofst);
+	fid = fid ? fid : feature_id(binfo->ioaddr + ofst);
 
 	if (binfo->len - ofst < size)
 		return -EINVAL;
@@ -1044,7 +1038,6 @@ create_feature_instance(struct build_feature_devs_info *binfo,
 		return -ENOMEM;
 
 	finfo->fid = fid;
-	finfo->revision = revision;
 	finfo->mmio_res.start = binfo->start + ofst;
 	finfo->mmio_res.end = finfo->mmio_res.start + size - 1;
 	finfo->mmio_res.flags = IORESOURCE_MEM;
@@ -1173,7 +1166,7 @@ static int parse_feature_private(struct build_feature_devs_info *binfo,
 {
 	if (!is_feature_dev_detected(binfo)) {
 		dev_err(binfo->dev, "the private feature 0x%x does not belong to any AFU.\n",
-			feature_id(readq(binfo->ioaddr + ofst)));
+			feature_id(binfo->ioaddr + ofst));
 		return -EINVAL;
 	}
 

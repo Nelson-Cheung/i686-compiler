@@ -54,7 +54,7 @@ __parse_regs(const struct option *opt, const char *str, int unset, bool intr)
 #endif
 				fputc('\n', stderr);
 				/* just printing available regs */
-				goto error;
+				return -1;
 			}
 #ifdef HAVE_PERF_REGS_SUPPORT
 			for (r = sample_reg_masks; r->name; r++) {

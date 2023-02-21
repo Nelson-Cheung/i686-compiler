@@ -2,12 +2,7 @@
 #ifndef __LINUX_ENTRYKVM_H
 #define __LINUX_ENTRYKVM_H
 
-#include <linux/static_call_types.h>
-#include <linux/tracehook.h>
-#include <linux/syscalls.h>
-#include <linux/seccomp.h>
-#include <linux/sched.h>
-#include <linux/tick.h>
+#include <linux/entry-common.h>
 
 /* Transfer to guest mode work */
 #ifdef CONFIG_KVM_XFER_TO_GUEST_WORK
@@ -16,8 +11,8 @@
 # define ARCH_XFER_TO_GUEST_MODE_WORK	(0)
 #endif
 
-#define XFER_TO_GUEST_MODE_WORK						\
-	(_TIF_NEED_RESCHED | _TIF_SIGPENDING | _TIF_NOTIFY_SIGNAL |	\
+#define XFER_TO_GUEST_MODE_WORK					\
+	(_TIF_NEED_RESCHED | _TIF_SIGPENDING |			\
 	 _TIF_NOTIFY_RESUME | ARCH_XFER_TO_GUEST_MODE_WORK)
 
 struct kvm_vcpu;
@@ -50,20 +45,6 @@ static inline int arch_xfer_to_guest_mode_handle_work(struct kvm_vcpu *vcpu,
  * Returns: 0 or an error code
  */
 int xfer_to_guest_mode_handle_work(struct kvm_vcpu *vcpu);
-
-/**
- * xfer_to_guest_mode_prepare - Perform last minute preparation work that
- *				need to be handled while IRQs are disabled
- *				upon entering to guest.
- *
- * Has to be invoked with interrupts disabled before the last call
- * to xfer_to_guest_mode_work_pending().
- */
-static inline void xfer_to_guest_mode_prepare(void)
-{
-	lockdep_assert_irqs_disabled();
-	tick_nohz_user_enter_prepare();
-}
 
 /**
  * __xfer_to_guest_mode_work_pending - Check if work is pending

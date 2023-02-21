@@ -69,6 +69,7 @@ struct siw_pd {
 
 struct siw_device {
 	struct ib_device base_dev;
+	struct device_dma_parameters dma_parms;
 	struct net_device *netdev;
 	struct siw_dev_cap attrs;
 
@@ -653,7 +654,7 @@ static inline struct siw_sqe *orq_get_free(struct siw_qp *qp)
 {
 	struct siw_sqe *orq_e = orq_get_tail(qp);
 
-	if (READ_ONCE(orq_e->flags) == 0)
+	if (orq_e && READ_ONCE(orq_e->flags) == 0)
 		return orq_e;
 
 	return NULL;

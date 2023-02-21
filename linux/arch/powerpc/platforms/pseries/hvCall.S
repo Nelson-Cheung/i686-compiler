@@ -102,20 +102,6 @@ END_FTR_SECTION(0, 1);						\
 #define HCALL_BRANCH(LABEL)
 #endif
 
-_GLOBAL_TOC(plpar_hcall_norets_notrace)
-	HMT_MEDIUM
-
-	mfcr	r0
-	stw	r0,8(r1)
-	HVSC				/* invoke the hypervisor */
-
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
-
-	lwz	r0,8(r1)
-	mtcrf	0xff,r0
-	blr				/* return r3 = status */
-
 _GLOBAL_TOC(plpar_hcall_norets)
 	HMT_MEDIUM
 
@@ -123,9 +109,6 @@ _GLOBAL_TOC(plpar_hcall_norets)
 	stw	r0,8(r1)
 	HCALL_BRANCH(plpar_hcall_norets_trace)
 	HVSC				/* invoke the hypervisor */
-
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -136,10 +119,6 @@ plpar_hcall_norets_trace:
 	HCALL_INST_PRECALL(R4)
 	HVSC
 	HCALL_INST_POSTCALL_NORETS
-
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
-
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
 	blr
@@ -170,9 +149,6 @@ _GLOBAL_TOC(plpar_hcall)
 	std	r6, 16(r12)
 	std	r7, 24(r12)
 
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
-
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
 
@@ -201,9 +177,6 @@ plpar_hcall_trace:
 	std	r7,24(r12)
 
 	HCALL_INST_POSTCALL(r12)
-
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -239,9 +212,6 @@ _GLOBAL(plpar_hcall_raw)
 	std	r5,  8(r12)
 	std	r6, 16(r12)
 	std	r7, 24(r12)
-
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -282,9 +252,6 @@ _GLOBAL_TOC(plpar_hcall9)
 	std	r11,56(r12)
 	std	r0, 64(r12)
 
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
-
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
 
@@ -322,9 +289,6 @@ plpar_hcall9_trace:
 	std	r0,64(r12)
 
 	HCALL_INST_POSTCALL(r12)
-
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -364,9 +328,6 @@ _GLOBAL(plpar_hcall9_raw)
 	std	r10,48(r12)
 	std	r11,56(r12)
 	std	r0, 64(r12)
-
-	li	r4,0
-	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0

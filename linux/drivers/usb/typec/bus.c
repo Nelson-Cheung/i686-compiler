@@ -9,8 +9,6 @@
 #include <linux/usb/pd_vdo.h>
 
 #include "bus.h"
-#include "class.h"
-#include "mux.h"
 
 static inline int
 typec_altmode_set_mux(struct altmode *alt, unsigned long conf, void *data)
@@ -382,7 +380,7 @@ static int typec_probe(struct device *dev)
 	return ret;
 }
 
-static void typec_remove(struct device *dev)
+static int typec_remove(struct device *dev)
 {
 	struct typec_altmode_driver *drv = to_altmode_driver(dev->driver);
 	struct typec_altmode *adev = to_typec_altmode(dev);
@@ -400,6 +398,8 @@ static void typec_remove(struct device *dev)
 
 	adev->desc = NULL;
 	adev->ops = NULL;
+
+	return 0;
 }
 
 struct bus_type typec_bus = {

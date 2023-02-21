@@ -75,8 +75,8 @@ static int uvc_ioctl_ctrl_map(struct uvc_video_chain *chain,
 		break;
 
 	default:
-		uvc_dbg(chain->dev, CONTROL,
-			"Unsupported V4L2 control type %u\n", xmap->v4l2_type);
+		uvc_trace(UVC_TRACE_CONTROL, "Unsupported V4L2 control type "
+			  "%u.\n", xmap->v4l2_type);
 		ret = -ENOTTY;
 		goto free_map;
 	}
@@ -164,10 +164,10 @@ static int uvc_v4l2_try_format(struct uvc_streaming *stream,
 		return -EINVAL;
 
 	fcc = (u8 *)&fmt->fmt.pix.pixelformat;
-	uvc_dbg(stream->dev, FORMAT, "Trying format 0x%08x (%c%c%c%c): %ux%u\n",
-		fmt->fmt.pix.pixelformat,
-		fcc[0], fcc[1], fcc[2], fcc[3],
-		fmt->fmt.pix.width, fmt->fmt.pix.height);
+	uvc_trace(UVC_TRACE_FORMAT, "Trying format 0x%08x (%c%c%c%c): %ux%u.\n",
+			fmt->fmt.pix.pixelformat,
+			fcc[0], fcc[1], fcc[2], fcc[3],
+			fmt->fmt.pix.width, fmt->fmt.pix.height);
 
 	/* Check if the hardware supports the requested format, use the default
 	 * format otherwise.
@@ -207,17 +207,16 @@ static int uvc_v4l2_try_format(struct uvc_streaming *stream,
 	}
 
 	if (frame == NULL) {
-		uvc_dbg(stream->dev, FORMAT, "Unsupported size %ux%u\n",
-			fmt->fmt.pix.width, fmt->fmt.pix.height);
+		uvc_trace(UVC_TRACE_FORMAT, "Unsupported size %ux%u.\n",
+				fmt->fmt.pix.width, fmt->fmt.pix.height);
 		return -EINVAL;
 	}
 
 	/* Use the default frame interval. */
 	interval = frame->dwDefaultFrameInterval;
-	uvc_dbg(stream->dev, FORMAT,
-		"Using default frame interval %u.%u us (%u.%u fps)\n",
-		interval / 10, interval % 10, 10000000 / interval,
-		(100000000 / interval) % 10);
+	uvc_trace(UVC_TRACE_FORMAT, "Using default frame interval %u.%u us "
+		"(%u.%u fps).\n", interval/10, interval%10, 10000000/interval,
+		(100000000/interval)%10);
 
 	/* Set the format index, frame index and frame interval. */
 	memset(probe, 0, sizeof(*probe));
@@ -249,9 +248,7 @@ static int uvc_v4l2_try_format(struct uvc_streaming *stream,
 		goto done;
 
 	/* After the probe, update fmt with the values returned from
-	 * negotiation with the device. Some devices return invalid bFormatIndex
-	 * and bFrameIndex values, in which case we can only assume they have
-	 * accepted the requested format as-is.
+	 * negotiation with the device.
 	 */
 	for (i = 0; i < stream->nformats; ++i) {
 		if (probe->bFormatIndex == stream->format[i].index) {
@@ -260,10 +257,11 @@ static int uvc_v4l2_try_format(struct uvc_streaming *stream,
 		}
 	}
 
-	if (i == stream->nformats)
-		uvc_dbg(stream->dev, FORMAT,
-			"Unknown bFormatIndex %u, using default\n",
-			probe->bFormatIndex);
+	if (i == stream->nformats) {
+		uvc_trace(UVC_TRACE_FORMAT, "Unknown bFormatIndex %u\n",
+			  probe->bFormatIndex);
+		return -EINVAL;
+	}
 
 	for (i = 0; i < format->nframes; ++i) {
 		if (probe->bFrameIndex == format->frame[i].bFrameIndex) {
@@ -272,10 +270,11 @@ static int uvc_v4l2_try_format(struct uvc_streaming *stream,
 		}
 	}
 
-	if (i == format->nframes)
-		uvc_dbg(stream->dev, FORMAT,
-			"Unknown bFrameIndex %u, using default\n",
-			probe->bFrameIndex);
+	if (i == format->nframes) {
+		uvc_trace(UVC_TRACE_FORMAT, "Unknown bFrameIndex %u\n",
+			  probe->bFrameIndex);
+		return -EINVAL;
+	}
 
 	fmt->fmt.pix.width = frame->wWidth;
 	fmt->fmt.pix.height = frame->wHeight;
@@ -417,7 +416,7 @@ static int uvc_v4l2_set_streamparm(struct uvc_streaming *stream,
 
 	interval = uvc_fraction_to_interval(timeperframe.numerator,
 		timeperframe.denominator);
-	uvc_dbg(stream->dev, FORMAT, "Setting frame interval to %u/%u (%u)\n",
+	uvc_trace(UVC_TRACE_FORMAT, "Setting frame interval to %u/%u (%u).\n",
 		timeperframe.numerator, timeperframe.denominator, interval);
 
 	mutex_lock(&stream->mutex);
@@ -546,8 +545,8 @@ static int uvc_v4l2_open(struct file *file)
 	struct uvc_fh *handle;
 	int ret = 0;
 
+	uvc_trace(UVC_TRACE_CALLS, "uvc_v4l2_open\n");
 	stream = video_drvdata(file);
-	uvc_dbg(stream->dev, CALLS, "%s\n", __func__);
 
 	ret = usb_autopm_get_interface(stream->dev->intf);
 	if (ret < 0)
@@ -589,7 +588,7 @@ static int uvc_v4l2_release(struct file *file)
 	struct uvc_fh *handle = file->private_data;
 	struct uvc_streaming *stream = handle->stream;
 
-	uvc_dbg(stream->dev, CALLS, "%s\n", __func__);
+	uvc_trace(UVC_TRACE_CALLS, "uvc_v4l2_release\n");
 
 	/* Only free resources if this is a privileged handle. */
 	if (uvc_has_privileges(handle))
@@ -899,8 +898,8 @@ static int uvc_ioctl_g_input(struct file *file, void *fh, unsigned int *input)
 {
 	struct uvc_fh *handle = fh;
 	struct uvc_video_chain *chain = handle->chain;
-	u8 *buf;
 	int ret;
+	u8 i;
 
 	if (chain->selector == NULL ||
 	    (chain->dev->quirks & UVC_QUIRK_IGNORE_SELECTOR_UNIT)) {
@@ -908,27 +907,22 @@ static int uvc_ioctl_g_input(struct file *file, void *fh, unsigned int *input)
 		return 0;
 	}
 
-	buf = kmalloc(1, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
 	ret = uvc_query_ctrl(chain->dev, UVC_GET_CUR, chain->selector->id,
 			     chain->dev->intfnum,  UVC_SU_INPUT_SELECT_CONTROL,
-			     buf, 1);
-	if (!ret)
-		*input = *buf - 1;
+			     &i, 1);
+	if (ret < 0)
+		return ret;
 
-	kfree(buf);
-
-	return ret;
+	*input = i - 1;
+	return 0;
 }
 
 static int uvc_ioctl_s_input(struct file *file, void *fh, unsigned int input)
 {
 	struct uvc_fh *handle = fh;
 	struct uvc_video_chain *chain = handle->chain;
-	u8 *buf;
 	int ret;
+	u32 i;
 
 	ret = uvc_acquire_privileges(handle);
 	if (ret < 0)
@@ -944,17 +938,10 @@ static int uvc_ioctl_s_input(struct file *file, void *fh, unsigned int input)
 	if (input >= chain->selector->bNrInPins)
 		return -EINVAL;
 
-	buf = kmalloc(1, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	*buf = input + 1;
-	ret = uvc_query_ctrl(chain->dev, UVC_SET_CUR, chain->selector->id,
-			     chain->dev->intfnum, UVC_SU_INPUT_SELECT_CONTROL,
-			     buf, 1);
-	kfree(buf);
-
-	return ret;
+	i = input + 1;
+	return uvc_query_ctrl(chain->dev, UVC_SET_CUR, chain->selector->id,
+			      chain->dev->intfnum, UVC_SU_INPUT_SELECT_CONTROL,
+			      &i, 1);
 }
 
 static int uvc_ioctl_queryctrl(struct file *file, void *fh,
@@ -1474,10 +1461,7 @@ static long uvc_v4l2_compat_ioctl32(struct file *file,
 static ssize_t uvc_v4l2_read(struct file *file, char __user *data,
 		    size_t count, loff_t *ppos)
 {
-	struct uvc_fh *handle = file->private_data;
-	struct uvc_streaming *stream = handle->stream;
-
-	uvc_dbg(stream->dev, CALLS, "%s: not implemented\n", __func__);
+	uvc_trace(UVC_TRACE_CALLS, "uvc_v4l2_read: not implemented.\n");
 	return -EINVAL;
 }
 
@@ -1486,7 +1470,7 @@ static int uvc_v4l2_mmap(struct file *file, struct vm_area_struct *vma)
 	struct uvc_fh *handle = file->private_data;
 	struct uvc_streaming *stream = handle->stream;
 
-	uvc_dbg(stream->dev, CALLS, "%s\n", __func__);
+	uvc_trace(UVC_TRACE_CALLS, "uvc_v4l2_mmap\n");
 
 	return uvc_queue_mmap(&stream->queue, vma);
 }
@@ -1496,7 +1480,7 @@ static __poll_t uvc_v4l2_poll(struct file *file, poll_table *wait)
 	struct uvc_fh *handle = file->private_data;
 	struct uvc_streaming *stream = handle->stream;
 
-	uvc_dbg(stream->dev, CALLS, "%s\n", __func__);
+	uvc_trace(UVC_TRACE_CALLS, "uvc_v4l2_poll\n");
 
 	return uvc_queue_poll(&stream->queue, file, wait);
 }
@@ -1509,7 +1493,7 @@ static unsigned long uvc_v4l2_get_unmapped_area(struct file *file,
 	struct uvc_fh *handle = file->private_data;
 	struct uvc_streaming *stream = handle->stream;
 
-	uvc_dbg(stream->dev, CALLS, "%s\n", __func__);
+	uvc_trace(UVC_TRACE_CALLS, "uvc_v4l2_get_unmapped_area\n");
 
 	return uvc_queue_get_unmapped_area(&stream->queue, pgoff);
 }

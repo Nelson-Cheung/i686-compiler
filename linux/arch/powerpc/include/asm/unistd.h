@@ -9,6 +9,8 @@
 
 #define NR_syscalls	__NR_syscalls
 
+#define __NR__exit __NR_exit
+
 #ifndef __ASSEMBLY__
 
 #include <linux/types.h>
@@ -38,7 +40,6 @@
 #define __ARCH_WANT_SYS_SIGPROCMASK
 #ifdef CONFIG_PPC32
 #define __ARCH_WANT_OLD_STAT
-#define __ARCH_WANT_SYS_OLD_SELECT
 #endif
 #ifdef CONFIG_PPC64
 #define __ARCH_WANT_SYS_TIME

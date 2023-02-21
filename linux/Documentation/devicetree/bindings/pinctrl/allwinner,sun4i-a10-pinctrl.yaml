@@ -53,8 +53,6 @@ properties:
       - allwinner,sun50i-h5-pinctrl
       - allwinner,sun50i-h6-pinctrl
       - allwinner,sun50i-h6-r-pinctrl
-      - allwinner,sun50i-h616-pinctrl
-      - allwinner,sun50i-h616-r-pinctrl
       - allwinner,suniv-f1c100s-pinctrl
       - nextthing,gr8-pinctrl
 
@@ -63,7 +61,7 @@ properties:
 
   interrupts:
     minItems: 1
-    maxItems: 8
+    maxItems: 7
     description:
       One interrupt per external interrupt bank supported on the
       controller, sorted by bank number ascending order.
@@ -93,7 +91,7 @@ properties:
       bank found in the controller
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
-    maxItems: 8
+    maxItems: 5
 
 patternProperties:
   # It's pretty scary, but the basic idea is that:
@@ -146,17 +144,6 @@ allOf:
   # FIXME: We should have the pin bank supplies here, but not a lot of
   # boards are defining it at the moment so it would generate a lot of
   # warnings.
-
-  - if:
-      properties:
-        compatible:
-          enum:
-            - allwinner,sun50i-h616-pinctrl
-
-    then:
-      properties:
-        interrupts:
-          minItems: 8
 
   - if:
       properties:

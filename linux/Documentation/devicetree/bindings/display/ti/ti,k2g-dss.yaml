@@ -54,8 +54,9 @@ properties:
     description: phandle to the associated power domain
 
   port:
-    $ref: /schemas/graph.yaml#/properties/port
+    type: object
     description:
+      Port as described in Documentation/devicetree/bindings/graph.txt.
       The DSS DPI output port node
 
   max-memory-bandwidth:

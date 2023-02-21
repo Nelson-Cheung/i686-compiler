@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 # Manipulate options in a .config file from the command line
 
@@ -223,7 +223,6 @@ while [ "$1" != "" ] ; do
 		;;
 
 	*)
-		echo "bad command: $CMD" >&2
 		usage
 		;;
 	esac

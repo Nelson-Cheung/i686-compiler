@@ -127,6 +127,7 @@ void dlpar_free_cc_nodes(struct device_node *dn)
 #define NEXT_PROPERTY   3
 #define PREV_PARENT     4
 #define MORE_MEMORY     5
+#define CALL_AGAIN	-2
 #define ERR_CFG_USE     -9003
 
 struct device_node *dlpar_configure_connector(__be32 drc_index,
@@ -166,9 +167,6 @@ struct device_node *dlpar_configure_connector(__be32 drc_index,
 		memcpy(data_buf, rtas_data_buf, RTAS_DATA_BUF_SIZE);
 
 		spin_unlock(&rtas_data_buf_lock);
-
-		if (rtas_busy_delay(rc))
-			continue;
 
 		switch (rc) {
 		case COMPLETE:
@@ -216,6 +214,9 @@ struct device_node *dlpar_configure_connector(__be32 drc_index,
 
 		case PREV_PARENT:
 			last_dn = last_dn->parent;
+			break;
+
+		case CALL_AGAIN:
 			break;
 
 		case MORE_MEMORY:
@@ -289,7 +290,8 @@ int dlpar_acquire_drc(u32 drc_index)
 {
 	int dr_status, rc;
 
-	rc = rtas_get_sensor(DR_ENTITY_SENSE, drc_index, &dr_status);
+	rc = rtas_call(rtas_token("get-sensor-state"), 2, 2, &dr_status,
+		       DR_ENTITY_SENSE, drc_index);
 	if (rc || dr_status != DR_ENTITY_UNUSABLE)
 		return -1;
 
@@ -310,7 +312,8 @@ int dlpar_release_drc(u32 drc_index)
 {
 	int dr_status, rc;
 
-	rc = rtas_get_sensor(DR_ENTITY_SENSE, drc_index, &dr_status);
+	rc = rtas_call(rtas_token("get-sensor-state"), 2, 2, &dr_status,
+		       DR_ENTITY_SENSE, drc_index);
 	if (rc || dr_status != DR_ENTITY_PRESENT)
 		return -1;
 
@@ -323,19 +326,6 @@ int dlpar_release_drc(u32 drc_index)
 		rtas_set_indicator(ISOLATION_STATE, drc_index, UNISOLATE);
 		return rc;
 	}
-
-	return 0;
-}
-
-int dlpar_unisolate_drc(u32 drc_index)
-{
-	int dr_status, rc;
-
-	rc = rtas_get_sensor(DR_ENTITY_SENSE, drc_index, &dr_status);
-	if (rc || dr_status != DR_ENTITY_PRESENT)
-		return -1;
-
-	rtas_set_indicator(ISOLATION_STATE, drc_index, UNISOLATE);
 
 	return 0;
 }
@@ -531,8 +521,11 @@ static ssize_t dlpar_store(struct class *class, struct class_attribute *attr,
 	int rc;
 
 	args = argbuf = kstrdup(buf, GFP_KERNEL);
-	if (!argbuf)
+	if (!argbuf) {
+		pr_info("Could not allocate resources for DLPAR operation\n");
+		kfree(argbuf);
 		return -ENOMEM;
+	}
 
 	/*
 	 * Parse out the request from the user, this will be in the form:

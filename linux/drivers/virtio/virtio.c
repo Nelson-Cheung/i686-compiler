@@ -4,7 +4,6 @@
 #include <linux/virtio_config.h>
 #include <linux/module.h>
 #include <linux/idr.h>
-#include <linux/of.h>
 #include <uapi/linux/virtio_ids.h>
 
 /* Unique numbering for virtio devices. */
@@ -142,14 +141,15 @@ void virtio_config_changed(struct virtio_device *dev)
 }
 EXPORT_SYMBOL_GPL(virtio_config_changed);
 
-static void virtio_config_disable(struct virtio_device *dev)
+void virtio_config_disable(struct virtio_device *dev)
 {
 	spin_lock_irq(&dev->config_lock);
 	dev->config_enabled = false;
 	spin_unlock_irq(&dev->config_lock);
 }
+EXPORT_SYMBOL_GPL(virtio_config_disable);
 
-static void virtio_config_enable(struct virtio_device *dev)
+void virtio_config_enable(struct virtio_device *dev)
 {
 	spin_lock_irq(&dev->config_lock);
 	dev->config_enabled = true;
@@ -158,6 +158,7 @@ static void virtio_config_enable(struct virtio_device *dev)
 	dev->config_change_pending = false;
 	spin_unlock_irq(&dev->config_lock);
 }
+EXPORT_SYMBOL_GPL(virtio_config_enable);
 
 void virtio_add_status(struct virtio_device *dev, unsigned int status)
 {
@@ -239,17 +240,6 @@ static int virtio_dev_probe(struct device *_d)
 		driver_features_legacy = driver_features;
 	}
 
-	/*
-	 * Some devices detect legacy solely via F_VERSION_1. Write
-	 * F_VERSION_1 to force LE config space accesses before FEATURES_OK for
-	 * these when needed.
-	 */
-	if (drv->validate && !virtio_legacy_is_little_endian()
-			  && device_features & BIT_ULL(VIRTIO_F_VERSION_1)) {
-		dev->features = BIT_ULL(VIRTIO_F_VERSION_1);
-		dev->config->finalize_features(dev);
-	}
-
 	if (device_features & (1ULL << VIRTIO_F_VERSION_1))
 		dev->features = driver_features & device_features;
 	else
@@ -290,7 +280,7 @@ err:
 
 }
 
-static void virtio_dev_remove(struct device *_d)
+static int virtio_dev_remove(struct device *_d)
 {
 	struct virtio_device *dev = dev_to_virtio(_d);
 	struct virtio_driver *drv = drv_to_virtio(dev->dev.driver);
@@ -304,8 +294,7 @@ static void virtio_dev_remove(struct device *_d)
 
 	/* Acknowledge the device's existence again. */
 	virtio_add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
-
-	of_node_put(dev->dev.of_node);
+	return 0;
 }
 
 static struct bus_type virtio_bus = {
@@ -332,48 +321,6 @@ void unregister_virtio_driver(struct virtio_driver *driver)
 }
 EXPORT_SYMBOL_GPL(unregister_virtio_driver);
 
-static int virtio_device_of_init(struct virtio_device *dev)
-{
-	struct device_node *np, *pnode = dev_of_node(dev->dev.parent);
-	char compat[] = "virtio,deviceXXXXXXXX";
-	int ret, count;
-
-	if (!pnode)
-		return 0;
-
-	count = of_get_available_child_count(pnode);
-	if (!count)
-		return 0;
-
-	/* There can be only 1 child node */
-	if (WARN_ON(count > 1))
-		return -EINVAL;
-
-	np = of_get_next_available_child(pnode, NULL);
-	if (WARN_ON(!np))
-		return -ENODEV;
-
-	ret = snprintf(compat, sizeof(compat), "virtio,device%x", dev->id.device);
-	BUG_ON(ret >= sizeof(compat));
-
-	/*
-	 * On powerpc/pseries virtio devices are PCI devices so PCI
-	 * vendor/device ids play the role of the "compatible" property.
-	 * Simply don't init of_node in this case.
-	 */
-	if (!of_device_is_compatible(np, compat)) {
-		ret = 0;
-		goto out;
-	}
-
-	dev->dev.of_node = np;
-	return 0;
-
-out:
-	of_node_put(np);
-	return ret;
-}
-
 /**
  * register_virtio_device - register virtio device
  * @dev        : virtio device to be registered
@@ -398,10 +345,6 @@ int register_virtio_device(struct virtio_device *dev)
 	dev->index = err;
 	dev_set_name(&dev->dev, "virtio%u", dev->index);
 
-	err = virtio_device_of_init(dev);
-	if (err)
-		goto out_ida_remove;
-
 	spin_lock_init(&dev->config_lock);
 	dev->config_enabled = false;
 	dev->config_change_pending = false;
@@ -414,7 +357,6 @@ int register_virtio_device(struct virtio_device *dev)
 	virtio_add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
 
 	INIT_LIST_HEAD(&dev->vqs);
-	spin_lock_init(&dev->vqs_list_lock);
 
 	/*
 	 * device_add() causes the bus infrastructure to look for a matching
@@ -422,16 +364,10 @@ int register_virtio_device(struct virtio_device *dev)
 	 */
 	err = device_add(&dev->dev);
 	if (err)
-		goto out_of_node_put;
-
-	return 0;
-
-out_of_node_put:
-	of_node_put(dev->dev.of_node);
-out_ida_remove:
-	ida_simple_remove(&virtio_index_ida, dev->index);
+		ida_simple_remove(&virtio_index_ida, dev->index);
 out:
-	virtio_add_status(dev, VIRTIO_CONFIG_S_FAILED);
+	if (err)
+		virtio_add_status(dev, VIRTIO_CONFIG_S_FAILED);
 	return err;
 }
 EXPORT_SYMBOL_GPL(register_virtio_device);

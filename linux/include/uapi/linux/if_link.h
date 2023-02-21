@@ -75,9 +75,8 @@ struct rtnl_link_stats {
  *
  * @rx_dropped: Number of packets received but not processed,
  *   e.g. due to lack of resources or unsupported protocol.
- *   For hardware interfaces this counter may include packets discarded
- *   due to L2 address filtering but should not include packets dropped
- *   by the device due to buffer exhaustion which are counted separately in
+ *   For hardware interfaces this counter should not include packets
+ *   dropped by the device which are counted separately in
  *   @rx_missed_errors (since procfs folds those two counters together).
  *
  * @tx_dropped: Number of packets dropped on their way to transmission,
@@ -341,13 +340,6 @@ enum {
 	IFLA_ALT_IFNAME, /* Alternative ifname */
 	IFLA_PERM_ADDRESS,
 	IFLA_PROTO_DOWN_REASON,
-
-	/* device (sysfs) name as parent, used instead
-	 * of IFLA_LINK where there's no parent netdev
-	 */
-	IFLA_PARENT_DEV_NAME,
-	IFLA_PARENT_DEV_BUS_NAME,
-
 	__IFLA_MAX
 };
 
@@ -417,7 +409,6 @@ enum {
 	IFLA_INET6_ICMP6STATS,	/* statistics (icmpv6)		*/
 	IFLA_INET6_TOKEN,	/* device token			*/
 	IFLA_INET6_ADDR_GEN_MODE, /* implicit address generator mode */
-	IFLA_INET6_RA_MTU,	/* mtu carried in the RA message */
 	__IFLA_INET6_MAX
 };
 
@@ -480,7 +471,6 @@ enum {
 	IFLA_BR_MCAST_MLD_VERSION,
 	IFLA_BR_VLAN_STATS_PER_PORT,
 	IFLA_BR_MULTI_BOOLOPT,
-	IFLA_BR_MCAST_QUERIER_STATE,
 	__IFLA_BR_MAX,
 };
 
@@ -534,8 +524,6 @@ enum {
 	IFLA_BRPORT_BACKUP_PORT,
 	IFLA_BRPORT_MRP_RING_OPEN,
 	IFLA_BRPORT_MRP_IN_OPEN,
-	IFLA_BRPORT_MCAST_EHT_HOSTS_LIMIT,
-	IFLA_BRPORT_MCAST_EHT_HOSTS_CNT,
 	__IFLA_BRPORT_MAX
 };
 #define IFLA_BRPORT_MAX (__IFLA_BRPORT_MAX - 1)
@@ -600,8 +588,6 @@ enum {
 	IFLA_MACVLAN_MACADDR,
 	IFLA_MACVLAN_MACADDR_DATA,
 	IFLA_MACVLAN_MACADDR_COUNT,
-	IFLA_MACVLAN_BC_QUEUE_LEN,
-	IFLA_MACVLAN_BC_QUEUE_LEN_USED,
 	__IFLA_MACVLAN_MAX,
 };
 
@@ -623,7 +609,6 @@ enum macvlan_macaddr_mode {
 };
 
 #define MACVLAN_FLAG_NOPROMISC	1
-#define MACVLAN_FLAG_NODST	2 /* skip dst macvlan if matching src macvlan */
 
 /* VRF section */
 enum {
@@ -857,7 +842,6 @@ enum {
 	IFLA_BOND_AD_ACTOR_SYSTEM,
 	IFLA_BOND_TLB_DYNAMIC_LB,
 	IFLA_BOND_PEER_NOTIF_DELAY,
-	IFLA_BOND_AD_LACP_ACTIVE,
 	__IFLA_BOND_MAX,
 };
 
@@ -1246,8 +1230,6 @@ enum {
 #define RMNET_FLAGS_INGRESS_MAP_COMMANDS          (1U << 1)
 #define RMNET_FLAGS_INGRESS_MAP_CKSUMV4           (1U << 2)
 #define RMNET_FLAGS_EGRESS_MAP_CKSUMV4            (1U << 3)
-#define RMNET_FLAGS_INGRESS_MAP_CKSUMV5           (1U << 4)
-#define RMNET_FLAGS_EGRESS_MAP_CKSUMV5            (1U << 5)
 
 enum {
 	IFLA_RMNET_UNSPEC,
@@ -1262,15 +1244,5 @@ struct ifla_rmnet_flags {
 	__u32	flags;
 	__u32	mask;
 };
-
-/* MCTP section */
-
-enum {
-	IFLA_MCTP_UNSPEC,
-	IFLA_MCTP_NET,
-	__IFLA_MCTP_MAX,
-};
-
-#define IFLA_MCTP_MAX (__IFLA_MCTP_MAX - 1)
 
 #endif /* _UAPI_LINUX_IF_LINK_H */

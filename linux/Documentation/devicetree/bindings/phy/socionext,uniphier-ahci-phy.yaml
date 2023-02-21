@@ -20,7 +20,7 @@ properties:
       - socionext,uniphier-pxs3-ahci-phy
 
   reg:
-    maxItems: 1
+    description: PHY register region (offset and length)
 
   "#phy-cells":
     const: 0

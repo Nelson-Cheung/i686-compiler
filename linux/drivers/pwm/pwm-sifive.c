@@ -232,6 +232,7 @@ static int pwm_sifive_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct pwm_sifive_ddata *ddata;
 	struct pwm_chip *chip;
+	struct resource *res;
 	int ret;
 
 	ddata = devm_kzalloc(dev, sizeof(*ddata), GFP_KERNEL);
@@ -242,9 +243,13 @@ static int pwm_sifive_probe(struct platform_device *pdev)
 	chip = &ddata->chip;
 	chip->dev = dev;
 	chip->ops = &pwm_sifive_ops;
+	chip->of_xlate = of_pwm_xlate_with_flags;
+	chip->of_pwm_n_cells = 3;
+	chip->base = -1;
 	chip->npwm = 4;
 
-	ddata->regs = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	ddata->regs = devm_ioremap_resource(dev, res);
 	if (IS_ERR(ddata->regs))
 		return PTR_ERR(ddata->regs);
 
@@ -291,7 +296,7 @@ static int pwm_sifive_remove(struct platform_device *dev)
 	struct pwm_sifive_ddata *ddata = platform_get_drvdata(dev);
 	bool is_enabled = false;
 	struct pwm_device *pwm;
-	int ch;
+	int ret, ch;
 
 	for (ch = 0; ch < ddata->chip.npwm; ch++) {
 		pwm = &ddata->chip.pwms[ch];
@@ -304,10 +309,10 @@ static int pwm_sifive_remove(struct platform_device *dev)
 		clk_disable(ddata->clk);
 
 	clk_disable_unprepare(ddata->clk);
-	pwmchip_remove(&ddata->chip);
+	ret = pwmchip_remove(&ddata->chip);
 	clk_notifier_unregister(ddata->clk, &ddata->notifier);
 
-	return 0;
+	return ret;
 }
 
 static const struct of_device_id pwm_sifive_of_match[] = {

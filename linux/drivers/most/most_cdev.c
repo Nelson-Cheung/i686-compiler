@@ -44,8 +44,8 @@ struct comp_channel {
 };
 
 #define to_channel(d) container_of(d, struct comp_channel, cdev)
-static LIST_HEAD(channel_list);
-static DEFINE_SPINLOCK(ch_list_lock);
+static struct list_head channel_list;
+static spinlock_t ch_list_lock;
 
 static inline bool ch_has_mbo(struct comp_channel *c)
 {
@@ -486,7 +486,7 @@ static struct cdev_component comp = {
 	},
 };
 
-static int __init most_cdev_init(void)
+static int __init mod_init(void)
 {
 	int err;
 
@@ -494,6 +494,8 @@ static int __init most_cdev_init(void)
 	if (IS_ERR(comp.class))
 		return PTR_ERR(comp.class);
 
+	INIT_LIST_HEAD(&channel_list);
+	spin_lock_init(&ch_list_lock);
 	ida_init(&comp.minor_id);
 
 	err = alloc_chrdev_region(&comp.devno, 0, CHRDEV_REGION_SIZE, "cdev");
@@ -518,7 +520,7 @@ dest_ida:
 	return err;
 }
 
-static void __exit most_cdev_exit(void)
+static void __exit mod_exit(void)
 {
 	struct comp_channel *c, *tmp;
 
@@ -534,8 +536,8 @@ static void __exit most_cdev_exit(void)
 	class_destroy(comp.class);
 }
 
-module_init(most_cdev_init);
-module_exit(most_cdev_exit);
+module_init(mod_init);
+module_exit(mod_exit);
 MODULE_AUTHOR("Christian Gromm <christian.gromm@microchip.com>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("character device component for mostcore");

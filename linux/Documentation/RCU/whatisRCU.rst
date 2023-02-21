@@ -497,7 +497,8 @@ long -- there might be other high-priority work to be done.
 In such cases, one uses call_rcu() rather than synchronize_rcu().
 The call_rcu() API is as follows::
 
-	void call_rcu(struct rcu_head *head, rcu_callback_t func);
+	void call_rcu(struct rcu_head * head,
+		      void (*func)(struct rcu_head *head));
 
 This function invokes func(head) after a grace period has elapsed.
 This invocation might happen from either softirq or process context,
@@ -683,7 +684,7 @@ Quick Quiz #1:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 This section presents a "toy" RCU implementation that is based on
 "classic RCU".  It is also short on performance (but only for updates) and
-on features such as hotplug CPU and the ability to run in CONFIG_PREEMPTION
+on features such as hotplug CPU and the ability to run in CONFIG_PREEMPT
 kernels.  The definitions of rcu_dereference() and rcu_assign_pointer()
 are the same as those shown in the preceding section, so they are omitted.
 ::
@@ -739,7 +740,7 @@ Quick Quiz #2:
 Quick Quiz #3:
 		If it is illegal to block in an RCU read-side
 		critical section, what the heck do you do in
-		CONFIG_PREEMPT_RT, where normal spinlocks can block???
+		PREEMPT_RT, where normal spinlocks can block???
 
 :ref:`Answers to Quick Quiz <8_whatisRCU>`
 
@@ -1093,7 +1094,7 @@ Quick Quiz #2:
 		overhead is **negative**.
 
 Answer:
-		Imagine a single-CPU system with a non-CONFIG_PREEMPTION
+		Imagine a single-CPU system with a non-CONFIG_PREEMPT
 		kernel where a routing table is used by process-context
 		code, but can be updated by irq-context code (for example,
 		by an "ICMP REDIRECT" packet).	The usual way of handling
@@ -1120,10 +1121,10 @@ Answer:
 Quick Quiz #3:
 		If it is illegal to block in an RCU read-side
 		critical section, what the heck do you do in
-		CONFIG_PREEMPT_RT, where normal spinlocks can block???
+		PREEMPT_RT, where normal spinlocks can block???
 
 Answer:
-		Just as CONFIG_PREEMPT_RT permits preemption of spinlock
+		Just as PREEMPT_RT permits preemption of spinlock
 		critical sections, it permits preemption of RCU
 		read-side critical sections.  It also permits
 		spinlocks blocking while in RCU read-side critical

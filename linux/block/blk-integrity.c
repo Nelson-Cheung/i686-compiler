@@ -426,27 +426,18 @@ EXPORT_SYMBOL(blk_integrity_register);
  */
 void blk_integrity_unregister(struct gendisk *disk)
 {
-	struct blk_integrity *bi = &disk->queue->integrity;
-
-	if (!bi->profile)
-		return;
-
-	/* ensure all bios are off the integrity workqueue */
-	blk_flush_integrity();
 	blk_queue_flag_clear(QUEUE_FLAG_STABLE_WRITES, disk->queue);
-	memset(bi, 0, sizeof(*bi));
+	memset(&disk->queue->integrity, 0, sizeof(struct blk_integrity));
 }
 EXPORT_SYMBOL(blk_integrity_unregister);
 
-int blk_integrity_add(struct gendisk *disk)
+void blk_integrity_add(struct gendisk *disk)
 {
-	int ret;
+	if (kobject_init_and_add(&disk->integrity_kobj, &integrity_ktype,
+				 &disk_to_dev(disk)->kobj, "%s", "integrity"))
+		return;
 
-	ret = kobject_init_and_add(&disk->integrity_kobj, &integrity_ktype,
-				   &disk_to_dev(disk)->kobj, "%s", "integrity");
-	if (!ret)
-		kobject_uevent(&disk->integrity_kobj, KOBJ_ADD);
-	return ret;
+	kobject_uevent(&disk->integrity_kobj, KOBJ_ADD);
 }
 
 void blk_integrity_del(struct gendisk *disk)

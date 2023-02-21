@@ -96,7 +96,7 @@ static void s2idle_enter(void)
 	s2idle_state = S2IDLE_STATE_ENTER;
 	raw_spin_unlock_irq(&s2idle_lock);
 
-	cpus_read_lock();
+	get_online_cpus();
 	cpuidle_resume();
 
 	/* Push all the CPUs into the idle loop. */
@@ -106,7 +106,7 @@ static void s2idle_enter(void)
 		    s2idle_state == S2IDLE_STATE_WAKE);
 
 	cpuidle_pause();
-	cpus_read_unlock();
+	put_online_cpus();
 
 	raw_spin_lock_irq(&s2idle_lock);
 
@@ -224,7 +224,6 @@ EXPORT_SYMBOL_GPL(suspend_set_ops);
 
 /**
  * suspend_valid_only_mem - Generic memory-only valid callback.
- * @state: Target system sleep state.
  *
  * Platform drivers that implement mem suspend only and only need to check for
  * that in their .valid() callback can use this instead of rolling their own
@@ -336,7 +335,6 @@ static int suspend_test(int level)
 
 /**
  * suspend_prepare - Prepare for entering system sleep state.
- * @state: Target system sleep state.
  *
  * Common code run for every system sleep state that can be entered (except for
  * hibernation).  Run suspend notifiers, allocate the "suspend" console and

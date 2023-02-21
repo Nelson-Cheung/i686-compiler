@@ -73,7 +73,7 @@ int pid_max_max = PID_MAX_LIMIT;
  * the scheme scales to up to 4 million PIDs, runtime.
  */
 struct pid_namespace init_pid_ns = {
-	.ns.count = REFCOUNT_INIT(2),
+	.kref = KREF_INIT(2),
 	.idr = IDR_INIT(init_pid_ns.idr),
 	.pid_allocated = PIDNS_ADDING,
 	.level = 0,
@@ -550,20 +550,12 @@ struct pid *pidfd_get_pid(unsigned int fd, unsigned int *flags)
  * Note, that this function can only be called after the fd table has
  * been unshared to avoid leaking the pidfd to the new process.
  *
- * This symbol should not be explicitly exported to loadable modules.
- *
  * Return: On success, a cloexec pidfd is returned.
  *         On error, a negative errno number will be returned.
  */
-int pidfd_create(struct pid *pid, unsigned int flags)
+static int pidfd_create(struct pid *pid, unsigned int flags)
 {
 	int fd;
-
-	if (!pid || !pid_has_task(pid, PIDTYPE_TGID))
-		return -EINVAL;
-
-	if (flags & ~(O_NONBLOCK | O_RDWR | O_CLOEXEC))
-		return -EINVAL;
 
 	fd = anon_inode_getfd("[pidfd]", &pidfd_fops, get_pid(pid),
 			      flags | O_RDWR | O_CLOEXEC);
@@ -604,7 +596,10 @@ SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 	if (!p)
 		return -ESRCH;
 
-	fd = pidfd_create(p, flags);
+	if (pid_has_task(p, PIDTYPE_TGID))
+		fd = pidfd_create(p, flags);
+	else
+		fd = -EINVAL;
 
 	put_pid(p);
 	return fd;
@@ -633,7 +628,7 @@ static struct file *__pidfd_fget(struct task_struct *task, int fd)
 	struct file *file;
 	int ret;
 
-	ret = down_read_killable(&task->signal->exec_update_lock);
+	ret = mutex_lock_killable(&task->signal->exec_update_mutex);
 	if (ret)
 		return ERR_PTR(ret);
 
@@ -642,7 +637,7 @@ static struct file *__pidfd_fget(struct task_struct *task, int fd)
 	else
 		file = ERR_PTR(-EPERM);
 
-	up_read(&task->signal->exec_update_lock);
+	mutex_unlock(&task->signal->exec_update_mutex);
 
 	return file ?: ERR_PTR(-EBADF);
 }

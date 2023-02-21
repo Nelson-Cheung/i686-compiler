@@ -599,7 +599,6 @@ void cpts_unregister(struct cpts *cpts)
 
 	ptp_clock_unregister(cpts->clock);
 	cpts->clock = NULL;
-	cpts->phc_index = -1;
 
 	cpts_write32(cpts, 0, int_enable);
 	cpts_write32(cpts, 0, control);
@@ -785,7 +784,6 @@ struct cpts *cpts_create(struct device *dev, void __iomem *regs,
 	cpts->cc.read = cpts_systim_read;
 	cpts->cc.mask = CLOCKSOURCE_MASK(32);
 	cpts->info = cpts_info;
-	cpts->phc_index = -1;
 
 	if (n_ext_ts)
 		cpts->info.n_ext_ts = n_ext_ts;

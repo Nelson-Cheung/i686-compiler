@@ -38,8 +38,6 @@
 #include "i915_drv.h"
 #include "intel_atomic.h"
 #include "intel_connector.h"
-#include "intel_crtc.h"
-#include "intel_de.h"
 #include "intel_display_types.h"
 #include "intel_fifo_underrun.h"
 #include "intel_gmbus.h"
@@ -1542,11 +1540,11 @@ static void intel_sdvo_pre_enable(struct intel_atomic_state *state,
 		return;
 
 	/* Set the SDVO control regs. */
-	if (DISPLAY_VER(dev_priv) >= 4) {
+	if (INTEL_GEN(dev_priv) >= 4) {
 		/* The real mode polarity is set by the SDVO commands, using
 		 * struct intel_sdvo_dtd. */
 		sdvox = SDVO_VSYNC_ACTIVE_HIGH | SDVO_HSYNC_ACTIVE_HIGH;
-		if (DISPLAY_VER(dev_priv) < 5)
+		if (INTEL_GEN(dev_priv) < 5)
 			sdvox |= SDVO_BORDER_ENABLE;
 	} else {
 		sdvox = intel_de_read(dev_priv, intel_sdvo->sdvo_reg);
@@ -1562,7 +1560,7 @@ static void intel_sdvo_pre_enable(struct intel_atomic_state *state,
 	else
 		sdvox |= SDVO_PIPE_SEL(crtc->pipe);
 
-	if (DISPLAY_VER(dev_priv) >= 4) {
+	if (INTEL_GEN(dev_priv) >= 4) {
 		/* done in crtc_mode_set as the dpll_md reg must be written early */
 	} else if (IS_I945G(dev_priv) || IS_I945GM(dev_priv) ||
 		   IS_G33(dev_priv) || IS_PINEVIEW(dev_priv)) {
@@ -1573,7 +1571,7 @@ static void intel_sdvo_pre_enable(struct intel_atomic_state *state,
 	}
 
 	if (input_dtd.part2.sdvo_flags & SDVO_NEED_TO_STALL &&
-	    DISPLAY_VER(dev_priv) < 5)
+	    INTEL_GEN(dev_priv) < 5)
 		sdvox |= SDVO_STALL_SELECT;
 	intel_sdvo_write_sdvox(intel_sdvo, sdvox);
 }
@@ -1824,7 +1822,7 @@ static void intel_enable_sdvo(struct intel_atomic_state *state,
 	struct drm_device *dev = encoder->base.dev;
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	struct intel_sdvo *intel_sdvo = to_sdvo(encoder);
-	struct intel_crtc *crtc = to_intel_crtc(pipe_config->uapi.crtc);
+	struct intel_crtc *intel_crtc = to_intel_crtc(pipe_config->uapi.crtc);
 	u32 temp;
 	bool input1, input2;
 	int i;
@@ -1835,7 +1833,7 @@ static void intel_enable_sdvo(struct intel_atomic_state *state,
 	intel_sdvo_write_sdvox(intel_sdvo, temp);
 
 	for (i = 0; i < 2; i++)
-		intel_wait_for_vblank(dev_priv, crtc->pipe);
+		intel_wait_for_vblank(dev_priv, intel_crtc->pipe);
 
 	success = intel_sdvo_get_trained_inputs(intel_sdvo, &input1, &input2);
 	/*
@@ -3283,7 +3281,7 @@ static bool
 intel_sdvo_init_ddc_proxy(struct intel_sdvo *sdvo,
 			  struct drm_i915_private *dev_priv)
 {
-	struct pci_dev *pdev = to_pci_dev(dev_priv->drm.dev);
+	struct pci_dev *pdev = dev_priv->drm.pdev;
 
 	sdvo->ddc.owner = THIS_MODULE;
 	sdvo->ddc.class = I2C_CLASS_DDC;

@@ -172,6 +172,7 @@ static int create_txqs(struct hinic_dev *nic_dev)
 				  "Failed to add SQ%d debug\n", i);
 			goto err_add_sq_dbg;
 		}
+
 	}
 
 	return 0;
@@ -232,7 +233,7 @@ static void free_txqs(struct hinic_dev *nic_dev)
 }
 
 /**
- * create_rxqs - Create the Logical Rx Queues of specific NIC device
+ * create_txqs - Create the Logical Rx Queues of specific NIC device
  * @nic_dev: the specific NIC device
  *
  * Return 0 - Success, negative - Failure
@@ -288,7 +289,7 @@ err_init_rxq:
 }
 
 /**
- * free_rxqs - Free the Logical Rx Queues of specific NIC device
+ * free_txqs - Free the Logical Rx Queues of specific NIC device
  * @nic_dev: the specific NIC device
  **/
 static void free_rxqs(struct hinic_dev *nic_dev)
@@ -312,7 +313,13 @@ static void free_rxqs(struct hinic_dev *nic_dev)
 
 static int hinic_configure_max_qnum(struct hinic_dev *nic_dev)
 {
-	return hinic_set_max_qnum(nic_dev, nic_dev->hwdev->nic_cap.max_qps);
+	int err;
+
+	err = hinic_set_max_qnum(nic_dev, nic_dev->hwdev->nic_cap.max_qps);
+	if (err)
+		return err;
+
+	return 0;
 }
 
 static int hinic_rss_init(struct hinic_dev *nic_dev)
@@ -1183,7 +1190,7 @@ static int nic_dev_init(struct pci_dev *pdev)
 	struct devlink *devlink;
 	int err, num_qps;
 
-	devlink = hinic_devlink_alloc(&pdev->dev);
+	devlink = hinic_devlink_alloc();
 	if (!devlink) {
 		dev_err(&pdev->dev, "Hinic devlink alloc failed\n");
 		return -ENOMEM;
@@ -1392,13 +1399,25 @@ static int hinic_probe(struct pci_dev *pdev,
 
 	pci_set_master(pdev);
 
-	err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	err = pci_set_dma_mask(pdev, DMA_BIT_MASK(64));
 	if (err) {
 		dev_warn(&pdev->dev, "Couldn't set 64-bit DMA mask\n");
-		err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+		err = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
 		if (err) {
 			dev_err(&pdev->dev, "Failed to set DMA mask\n");
 			goto err_dma_mask;
+		}
+	}
+
+	err = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
+	if (err) {
+		dev_warn(&pdev->dev,
+			 "Couldn't set 64-bit consistent DMA mask\n");
+		err = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
+		if (err) {
+			dev_err(&pdev->dev,
+				"Failed to set consistent DMA mask\n");
+			goto err_dma_consistent_mask;
 		}
 	}
 
@@ -1412,6 +1431,7 @@ static int hinic_probe(struct pci_dev *pdev,
 	return 0;
 
 err_nic_dev_init:
+err_dma_consistent_mask:
 err_dma_mask:
 	pci_release_regions(pdev);
 

@@ -5,7 +5,6 @@
 //  Copyright (C) 2012 Samsung Electronics
 //  Donggeun Kim <dg77.kim@samsung.com>
 
-#include <linux/devm-helpers.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/i2c.h>
@@ -45,8 +44,6 @@ static struct max8997_muic_irq muic_irqs[] = {
 	{ MAX8997_MUICIRQ_ChgDetRun,	"muic-CHGDETRUN" },
 	{ MAX8997_MUICIRQ_ChgTyp,	"muic-CHGTYP" },
 	{ MAX8997_MUICIRQ_OVP,		"muic-OVP" },
-	{ MAX8997_PMICIRQ_CHGINS,	"pmic-CHGINS" },
-	{ MAX8997_PMICIRQ_CHGRM,	"pmic-CHGRM" },
 };
 
 /* Define supported cable type */
@@ -541,8 +538,6 @@ static void max8997_muic_irq_work(struct work_struct *work)
 	case MAX8997_MUICIRQ_DCDTmr:
 	case MAX8997_MUICIRQ_ChgDetRun:
 	case MAX8997_MUICIRQ_ChgTyp:
-	case MAX8997_PMICIRQ_CHGINS:
-	case MAX8997_PMICIRQ_CHGRM:
 		/* Handle charger cable */
 		ret = max8997_muic_chg_handler(info);
 		break;
@@ -651,30 +646,27 @@ static int max8997_muic_probe(struct platform_device *pdev)
 	mutex_init(&info->mutex);
 
 	INIT_WORK(&info->irq_work, max8997_muic_irq_work);
-	ret = devm_work_autocancel(&pdev->dev, &info->irq_work,
-				   max8997_muic_irq_work);
-	if (ret)
-		return ret;
 
 	for (i = 0; i < ARRAY_SIZE(muic_irqs); i++) {
 		struct max8997_muic_irq *muic_irq = &muic_irqs[i];
 		unsigned int virq = 0;
 
 		virq = irq_create_mapping(max8997->irq_domain, muic_irq->irq);
-		if (!virq)
-			return -EINVAL;
-
+		if (!virq) {
+			ret = -EINVAL;
+			goto err_irq;
+		}
 		muic_irq->virq = virq;
 
-		ret = devm_request_threaded_irq(&pdev->dev, virq, NULL,
-						max8997_muic_irq_handler,
-						IRQF_NO_SUSPEND,
-						muic_irq->name, info);
+		ret = request_threaded_irq(virq, NULL,
+				max8997_muic_irq_handler,
+				IRQF_NO_SUSPEND,
+				muic_irq->name, info);
 		if (ret) {
 			dev_err(&pdev->dev,
 				"failed: irq request (IRQ: %d, error :%d)\n",
 				muic_irq->irq, ret);
-			return ret;
+			goto err_irq;
 		}
 	}
 
@@ -682,13 +674,14 @@ static int max8997_muic_probe(struct platform_device *pdev)
 	info->edev = devm_extcon_dev_allocate(&pdev->dev, max8997_extcon_cable);
 	if (IS_ERR(info->edev)) {
 		dev_err(&pdev->dev, "failed to allocate memory for extcon\n");
-		return PTR_ERR(info->edev);
+		ret = PTR_ERR(info->edev);
+		goto err_irq;
 	}
 
 	ret = devm_extcon_dev_register(&pdev->dev, info->edev);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register extcon device\n");
-		return ret;
+		goto err_irq;
 	}
 
 	if (pdata && pdata->muic_pdata) {
@@ -759,6 +752,23 @@ static int max8997_muic_probe(struct platform_device *pdev)
 			delay_jiffies);
 
 	return 0;
+
+err_irq:
+	while (--i >= 0)
+		free_irq(muic_irqs[i].virq, info);
+	return ret;
+}
+
+static int max8997_muic_remove(struct platform_device *pdev)
+{
+	struct max8997_muic_info *info = platform_get_drvdata(pdev);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(muic_irqs); i++)
+		free_irq(muic_irqs[i].virq, info);
+	cancel_work_sync(&info->irq_work);
+
+	return 0;
 }
 
 static struct platform_driver max8997_muic_driver = {
@@ -766,6 +776,7 @@ static struct platform_driver max8997_muic_driver = {
 		.name	= DEV_NAME,
 	},
 	.probe		= max8997_muic_probe,
+	.remove		= max8997_muic_remove,
 };
 
 module_platform_driver(max8997_muic_driver);
@@ -773,4 +784,3 @@ module_platform_driver(max8997_muic_driver);
 MODULE_DESCRIPTION("Maxim MAX8997 Extcon driver");
 MODULE_AUTHOR("Donggeun Kim <dg77.kim@samsung.com>");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:max8997-muic");

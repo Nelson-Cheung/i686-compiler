@@ -189,7 +189,6 @@ struct ocmem *of_get_ocmem(struct device *dev)
 {
 	struct platform_device *pdev;
 	struct device_node *devnode;
-	struct ocmem *ocmem;
 
 	devnode = of_parse_phandle(dev->of_node, "sram", 0);
 	if (!devnode || !devnode->parent) {
@@ -203,12 +202,7 @@ struct ocmem *of_get_ocmem(struct device *dev)
 		return ERR_PTR(-EPROBE_DEFER);
 	}
 
-	ocmem = platform_get_drvdata(pdev);
-	if (!ocmem) {
-		dev_err(dev, "Cannot get ocmem\n");
-		return ERR_PTR(-ENODEV);
-	}
-	return ocmem;
+	return platform_get_drvdata(pdev);
 }
 EXPORT_SYMBOL(of_get_ocmem);
 

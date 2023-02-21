@@ -113,17 +113,13 @@ static int ingenic_trng_probe(struct platform_device *pdev)
 	ret = hwrng_register(&trng->rng);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to register hwrng\n");
-		goto err_unprepare_clk;
+		return ret;
 	}
 
 	platform_set_drvdata(pdev, trng);
 
 	dev_info(&pdev->dev, "Ingenic DTRNG driver registered\n");
 	return 0;
-
-err_unprepare_clk:
-	clk_disable_unprepare(trng->clk);
-	return ret;
 }
 
 static int ingenic_trng_remove(struct platform_device *pdev)

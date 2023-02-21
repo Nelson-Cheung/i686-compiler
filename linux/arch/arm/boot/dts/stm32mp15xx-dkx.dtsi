@@ -124,10 +124,6 @@
 	status = "okay";
 };
 
-&crc1 {
-	status = "okay";
-};
-
 &dts {
 	status = "okay";
 };
@@ -153,10 +149,6 @@
 
 &gpu {
 	contiguous-area = <&gpu_reserved>;
-};
-
-&hash1 {
-	status = "okay";
 };
 
 &i2c1 {
@@ -220,15 +212,15 @@
 			cs42l51_tx_endpoint: endpoint@0 {
 				reg = <0>;
 				remote-endpoint = <&sai2a_endpoint>;
-				frame-master = <&cs42l51_tx_endpoint>;
-				bitclock-master = <&cs42l51_tx_endpoint>;
+				frame-master;
+				bitclock-master;
 			};
 
 			cs42l51_rx_endpoint: endpoint@1 {
 				reg = <1>;
 				remote-endpoint = <&sai2b_endpoint>;
-				frame-master = <&cs42l51_rx_endpoint>;
-				bitclock-master = <&cs42l51_rx_endpoint>;
+				frame-master;
+				bitclock-master;
 			};
 		};
 	};
@@ -245,30 +237,6 @@
 	/* spare dmas for other usage */
 	/delete-property/dmas;
 	/delete-property/dma-names;
-
-	stusb1600@28 {
-		compatible = "st,stusb1600";
-		reg = <0x28>;
-		interrupts = <11 IRQ_TYPE_EDGE_FALLING>;
-		interrupt-parent = <&gpioi>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&stusb1600_pins_a>;
-		status = "okay";
-		vdd-supply = <&vin>;
-
-		connector {
-			compatible = "usb-c-connector";
-			label = "USB-C";
-			power-role = "dual";
-			typec-power-opmode = "default";
-
-			port {
-				con_usbotg_hs_ep: endpoint {
-					remote-endpoint = <&usbotg_hs_ep>;
-				};
-			};
-		};
-	};
 
 	pmic: stpmic@33 {
 		compatible = "st,stpmic1";
@@ -470,8 +438,8 @@
 &m4_rproc {
 	memory-region = <&retram>, <&mcuram>, <&mcuram2>, <&vdev0vring0>,
 			<&vdev0vring1>, <&vdev0buffer>;
-	mboxes = <&ipcc 0>, <&ipcc 1>, <&ipcc 2>, <&ipcc 3>;
-	mbox-names = "vq0", "vq1", "shutdown", "detach";
+	mboxes = <&ipcc 0>, <&ipcc 1>, <&ipcc 2>;
+	mbox-names = "vq0", "vq1", "shutdown";
 	interrupt-parent = <&exti>;
 	interrupts = <68 1>;
 	status = "okay";
@@ -680,12 +648,6 @@
 	phy-names = "usb2-phy";
 	usb-role-switch;
 	status = "okay";
-
-	port {
-		usbotg_hs_ep: endpoint {
-			remote-endpoint = <&con_usbotg_hs_ep>;
-		};
-	};
 };
 
 &usbphyc {
@@ -694,10 +656,14 @@
 
 &usbphyc_port0 {
 	phy-supply = <&vdd_usb>;
+	vdda1v1-supply = <&reg11>;
+	vdda1v8-supply = <&reg18>;
 };
 
 &usbphyc_port1 {
 	phy-supply = <&vdd_usb>;
+	vdda1v1-supply = <&reg11>;
+	vdda1v8-supply = <&reg18>;
 };
 
 &vrefbuf {

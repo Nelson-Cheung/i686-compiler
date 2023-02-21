@@ -9,9 +9,10 @@
 #include "../include/gaudi/gaudi_coresight.h"
 #include "../include/gaudi/asic_reg/gaudi_regs.h"
 #include "../include/gaudi/gaudi_masks.h"
-#include "../include/gaudi/gaudi_reg_map.h"
 
 #include <uapi/misc/habanalabs.h>
+#include <linux/coresight.h>
+
 #define SPMU_SECTION_SIZE		MME0_ACC_SPMU_MAX_OFFSET
 #define SPMU_EVENT_TYPES_OFFSET		0x400
 #define SPMU_MAX_COUNTERS		6
@@ -424,7 +425,7 @@ static int gaudi_config_stm(struct hl_device *hdev,
 		if (frequency == 0)
 			frequency = input->frequency;
 		WREG32(base_reg + 0xE8C, frequency);
-		WREG32(base_reg + 0xE90, 0x1F00);
+		WREG32(base_reg + 0xE90, 0x7FF);
 
 		/* SW-2176 - SW WA for HW bug */
 		if ((CFG_BASE + base_reg) >= mmDMA_CH_0_CS_STM_BASE &&
@@ -434,7 +435,7 @@ static int gaudi_config_stm(struct hl_device *hdev,
 			WREG32(base_reg + 0xE6C, 0x0);
 		}
 
-		WREG32(base_reg + 0xE80, 0x23 | (input->id << 16));
+		WREG32(base_reg + 0xE80, 0x27 | (input->id << 16));
 	} else {
 		WREG32(base_reg + 0xE80, 4);
 		WREG32(base_reg + 0xD64, 0);
@@ -622,6 +623,11 @@ static int gaudi_config_etr(struct hl_device *hdev,
 			return -EINVAL;
 		}
 
+		gaudi_mmu_prepare_reg(hdev, mmPSOC_GLOBAL_CONF_TRACE_ARUSER,
+						hdev->compute_ctx->asid);
+		gaudi_mmu_prepare_reg(hdev, mmPSOC_GLOBAL_CONF_TRACE_AWUSER,
+						hdev->compute_ctx->asid);
+
 		msb = upper_32_bits(input->buffer_address) >> 8;
 		msb &= PSOC_GLOBAL_CONF_TRACE_ADDR_MSB_MASK;
 		WREG32(mmPSOC_GLOBAL_CONF_TRACE_ADDR, msb);
@@ -629,21 +635,9 @@ static int gaudi_config_etr(struct hl_device *hdev,
 		WREG32(mmPSOC_ETR_BUFWM, 0x3FFC);
 		WREG32(mmPSOC_ETR_RSZ, input->buffer_size);
 		WREG32(mmPSOC_ETR_MODE, input->sink_mode);
-		if (!hdev->asic_prop.fw_security_enabled) {
-			/* make ETR not privileged */
-			val = FIELD_PREP(
-					PSOC_ETR_AXICTL_PROTCTRLBIT0_MASK, 0);
-			/* make ETR non-secured (inverted logic) */
-			val |= FIELD_PREP(
-					PSOC_ETR_AXICTL_PROTCTRLBIT1_MASK, 1);
-			/*
-			 * Workaround for H3 #HW-2075 bug: use small data
-			 * chunks
-			 */
-			val |= FIELD_PREP(PSOC_ETR_AXICTL_WRBURSTLEN_MASK,
-							is_host ? 0 : 7);
-			WREG32(mmPSOC_ETR_AXICTL, val);
-		}
+		/* Workaround for H3 #HW-2075 bug: use small data chunks */
+		WREG32(mmPSOC_ETR_AXICTL, (is_host ? 0 : 0x700) |
+					PSOC_ETR_AXICTL_PROTCTRLBIT1_SHIFT);
 		WREG32(mmPSOC_ETR_DBALO,
 				lower_32_bits(input->buffer_address));
 		WREG32(mmPSOC_ETR_DBAHI,
@@ -882,7 +876,7 @@ int gaudi_debug_coresight(struct hl_device *hdev, void *data)
 	}
 
 	/* Perform read from the device to flush all configuration */
-	RREG32(mmHW_STATE);
+	RREG32(mmPCIE_DBI_DEVICE_ID_VENDOR_ID_REG);
 
 	return rc;
 }

@@ -24,6 +24,7 @@ properties:
 
   clocks:
     minItems: 1
+    maxItems: 2
     items:
       - description: Bus Clock
       - description: Module Clock
@@ -46,9 +47,11 @@ properties:
     const: dphy
 
   port:
-    $ref: /schemas/graph.yaml#/properties/port
+    type: object
     description:
-      The port should be the input endpoint, usually coming from the
+      A port node with endpoint definitions as defined in
+      Documentation/devicetree/bindings/media/video-interfaces.txt. That
+      port should be the input endpoint, usually coming from the
       associated TCON.
 
 required:

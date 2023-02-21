@@ -49,6 +49,8 @@ properties:
   "#io-channel-cells":
     const: 1
 
+  io-channel-ranges: true
+
   vdd-supply: true
 
   samsung,syscon-phandle:
@@ -128,6 +130,7 @@ examples:
         reg = <0x12d10000 0x100>;
         interrupts = <0 106 0>;
         #io-channel-cells = <1>;
+        io-channel-ranges;
 
         clocks = <&clock 303>;
         clock-names = "adc";
@@ -153,6 +156,7 @@ examples:
         reg = <0x126C0000 0x100>;
         interrupts = <0 137 0>;
         #io-channel-cells = <1>;
+        io-channel-ranges;
 
         clocks = <&cmu CLK_TSADC>,
                  <&cmu CLK_SCLK_TSADC>;

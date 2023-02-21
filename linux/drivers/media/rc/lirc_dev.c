@@ -263,8 +263,7 @@ static ssize_t lirc_transmit(struct file *file, const char __user *buf,
 			goto out_unlock;
 		}
 
-		if (scan.flags || scan.keycode || scan.timestamp ||
-		    scan.rc_proto > RC_PROTO_MAX) {
+		if (scan.flags || scan.keycode || scan.timestamp) {
 			ret = -EINVAL;
 			goto out_unlock;
 		}
@@ -412,7 +411,7 @@ static long lirc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			val |= LIRC_CAN_SET_REC_CARRIER |
 				LIRC_CAN_SET_REC_CARRIER_RANGE;
 
-		if (dev->s_wideband_receiver)
+		if (dev->s_learning_mode)
 			val |= LIRC_CAN_USE_WIDEBAND_RECEIVER;
 
 		if (dev->s_carrier_report)
@@ -519,10 +518,10 @@ static long lirc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 
 	case LIRC_SET_WIDEBAND_RECEIVER:
-		if (!dev->s_wideband_receiver)
+		if (!dev->s_learning_mode)
 			ret = -ENOTTY;
 		else
-			ret = dev->s_wideband_receiver(dev, !!val);
+			ret = dev->s_learning_mode(dev, !!val);
 		break;
 
 	case LIRC_SET_MEASURE_CARRIER_MODE:

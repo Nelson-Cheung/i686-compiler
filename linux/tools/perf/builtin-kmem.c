@@ -1953,22 +1953,25 @@ int cmd_kmem(int argc, const char **argv)
 
 	data.path = input_name;
 
-	kmem_session = session = perf_session__new(&data, &perf_kmem);
+	kmem_session = session = perf_session__new(&data, false, &perf_kmem);
 	if (IS_ERR(session))
 		return PTR_ERR(session);
 
 	ret = -1;
 
 	if (kmem_slab) {
-		if (!evlist__find_tracepoint_by_name(session->evlist, "kmem:kmalloc")) {
+		if (!perf_evlist__find_tracepoint_by_name(session->evlist,
+							  "kmem:kmalloc")) {
 			pr_err(errmsg, "slab", "slab");
 			goto out_delete;
 		}
 	}
 
 	if (kmem_page) {
-		struct evsel *evsel = evlist__find_tracepoint_by_name(session->evlist, "kmem:mm_page_alloc");
+		struct evsel *evsel;
 
+		evsel = perf_evlist__find_tracepoint_by_name(session->evlist,
+							     "kmem:mm_page_alloc");
 		if (evsel == NULL) {
 			pr_err(errmsg, "page", "page");
 			goto out_delete;

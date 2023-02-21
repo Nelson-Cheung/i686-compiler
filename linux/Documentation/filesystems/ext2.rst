@@ -1,7 +1,6 @@
 .. SPDX-License-Identifier: GPL-2.0
 
 
-==============================
 The Second Extended Filesystem
 ==============================
 
@@ -25,7 +24,7 @@ check=none, nocheck	(*)	Don't do extra checking of bitmaps on mount
 				(check=normal and check=strict options removed)
 
 dax				Use direct access (no page cache).  See
-				Documentation/filesystems/dax.rst.
+				Documentation/filesystems/dax.txt.
 
 debug				Extra debugging information is sent to the
 				kernel syslog.  Useful for developers.

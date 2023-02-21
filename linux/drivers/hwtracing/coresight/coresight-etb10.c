@@ -132,7 +132,7 @@ static void __etb_enable_hw(struct etb_drvdata *drvdata)
 
 static int etb_enable_hw(struct etb_drvdata *drvdata)
 {
-	int rc = coresight_claim_device(drvdata->csdev);
+	int rc = coresight_claim_device(drvdata->base);
 
 	if (rc)
 		return rc;
@@ -176,7 +176,6 @@ static int etb_enable_perf(struct coresight_device *csdev, void *data)
 	unsigned long flags;
 	struct etb_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 	struct perf_output_handle *handle = data;
-	struct cs_buffers *buf = etm_perf_sink_config(handle);
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
@@ -187,7 +186,7 @@ static int etb_enable_perf(struct coresight_device *csdev, void *data)
 	}
 
 	/* Get a handle on the pid of the process to monitor */
-	pid = buf->pid;
+	pid = task_pid_nr(handle->event->owner);
 
 	if (drvdata->pid != -1 && drvdata->pid != pid) {
 		ret = -EBUSY;
@@ -252,7 +251,6 @@ static void __etb_disable_hw(struct etb_drvdata *drvdata)
 {
 	u32 ffcr;
 	struct device *dev = &drvdata->csdev->dev;
-	struct csdev_access *csa = &drvdata->csdev->access;
 
 	CS_UNLOCK(drvdata->base);
 
@@ -264,7 +262,7 @@ static void __etb_disable_hw(struct etb_drvdata *drvdata)
 	ffcr |= ETB_FFCR_FON_MAN;
 	writel_relaxed(ffcr, drvdata->base + ETB_FFCR);
 
-	if (coresight_timeout(csa, ETB_FFCR, ETB_FFCR_BIT, 0)) {
+	if (coresight_timeout(drvdata->base, ETB_FFCR, ETB_FFCR_BIT, 0)) {
 		dev_err(dev,
 		"timeout while waiting for completion of Manual Flush\n");
 	}
@@ -272,7 +270,7 @@ static void __etb_disable_hw(struct etb_drvdata *drvdata)
 	/* disable trace capture */
 	writel_relaxed(0x0, drvdata->base + ETB_CTL_REG);
 
-	if (coresight_timeout(csa, ETB_FFSR, ETB_FFSR_BIT, 1)) {
+	if (coresight_timeout(drvdata->base, ETB_FFSR, ETB_FFSR_BIT, 1)) {
 		dev_err(dev,
 			"timeout while waiting for Formatter to Stop\n");
 	}
@@ -345,7 +343,7 @@ static void etb_disable_hw(struct etb_drvdata *drvdata)
 {
 	__etb_disable_hw(drvdata);
 	etb_dump_hw(drvdata);
-	coresight_disclaim_device(drvdata->csdev);
+	coresight_disclaim_device(drvdata->base);
 }
 
 static int etb_disable(struct coresight_device *csdev)
@@ -385,7 +383,6 @@ static void *etb_alloc_buffer(struct coresight_device *csdev,
 	if (!buf)
 		return NULL;
 
-	buf->pid = task_pid_nr(event->owner);
 	buf->snapshot = overwrite;
 	buf->nr_pages = nr_pages;
 	buf->data_pages = pages;
@@ -758,7 +755,6 @@ static int etb_probe(struct amba_device *adev, const struct amba_id *id)
 		return PTR_ERR(base);
 
 	drvdata->base = base;
-	desc.access = CSDEV_ACCESS_IOMEM(base);
 
 	spin_lock_init(&drvdata->spinlock);
 
@@ -805,7 +801,7 @@ err_misc_register:
 	return ret;
 }
 
-static void etb_remove(struct amba_device *adev)
+static int __exit etb_remove(struct amba_device *adev)
 {
 	struct etb_drvdata *drvdata = dev_get_drvdata(&adev->dev);
 
@@ -816,6 +812,8 @@ static void etb_remove(struct amba_device *adev)
 	 */
 	misc_deregister(&drvdata->miscdev);
 	coresight_unregister(drvdata->csdev);
+
+	return 0;
 }
 
 #ifdef CONFIG_PM

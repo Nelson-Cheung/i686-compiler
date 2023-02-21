@@ -24,6 +24,7 @@ properties:
 
   interrupts:
     minItems: 2
+    maxItems: 4
     items:
       - description: Timer 0 Interrupt
       - description: Timer 1 Interrupt
@@ -45,7 +46,8 @@ required:
 if:
   properties:
     compatible:
-      const: allwinner,sun5i-a13-hstimer
+      items:
+        const: allwinner,sun5i-a13-hstimer
 
 then:
   properties:

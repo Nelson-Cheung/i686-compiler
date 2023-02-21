@@ -218,6 +218,8 @@ static int ipip6_tunnel_create(struct net_device *dev)
 
 	ipip6_tunnel_clone_6rd(dev, sitn);
 
+	dev_hold(dev);
+
 	ipip6_tunnel_link(sitn, t);
 	return 0;
 
@@ -271,9 +273,6 @@ static struct ip_tunnel *ipip6_tunnel_locate(struct net *net,
 	if (ipip6_tunnel_create(dev) < 0)
 		goto failed_free;
 
-	if (!parms->name[0])
-		strcpy(parms->name, dev->name);
-
 	return nt;
 
 failed_free:
@@ -299,8 +298,9 @@ __ipip6_tunnel_locate_prl(struct ip_tunnel *t, __be32 addr)
 
 }
 
-static int ipip6_tunnel_get_prl(struct net_device *dev, struct ip_tunnel_prl __user *a)
+static int ipip6_tunnel_get_prl(struct net_device *dev, struct ifreq *ifr)
 {
+	struct ip_tunnel_prl __user *a = ifr->ifr_ifru.ifru_data;
 	struct ip_tunnel *t = netdev_priv(dev);
 	struct ip_tunnel_prl kprl, *kp;
 	struct ip_tunnel_prl_entry *prl;
@@ -320,12 +320,12 @@ static int ipip6_tunnel_get_prl(struct net_device *dev, struct ip_tunnel_prl __u
 	 * we try harder to allocate.
 	 */
 	kp = (cmax <= 1 || capable(CAP_NET_ADMIN)) ?
-		kcalloc(cmax, sizeof(*kp), GFP_KERNEL_ACCOUNT | __GFP_NOWARN) :
+		kcalloc(cmax, sizeof(*kp), GFP_KERNEL | __GFP_NOWARN) :
 		NULL;
 
 	rcu_read_lock();
 
-	ca = min(t->prl_count, cmax);
+	ca = t->prl_count < cmax ? t->prl_count : cmax;
 
 	if (!kp) {
 		/* We don't try hard to allocate much memory for
@@ -333,8 +333,7 @@ static int ipip6_tunnel_get_prl(struct net_device *dev, struct ip_tunnel_prl __u
 		 * For root users, retry allocating enough memory for
 		 * the answer.
 		 */
-		kp = kcalloc(ca, sizeof(*kp), GFP_ATOMIC | __GFP_ACCOUNT |
-					      __GFP_NOWARN);
+		kp = kcalloc(ca, sizeof(*kp), GFP_ATOMIC);
 		if (!kp) {
 			ret = -ENOMEM;
 			goto out;
@@ -453,8 +452,8 @@ out:
 	return err;
 }
 
-static int ipip6_tunnel_prl_ctl(struct net_device *dev,
-				struct ip_tunnel_prl __user *data, int cmd)
+static int ipip6_tunnel_prl_ctl(struct net_device *dev, struct ifreq *ifr,
+		int cmd)
 {
 	struct ip_tunnel *t = netdev_priv(dev);
 	struct ip_tunnel_prl prl;
@@ -465,7 +464,7 @@ static int ipip6_tunnel_prl_ctl(struct net_device *dev,
 	if (dev == dev_to_sit_net(dev)->fb_tunnel_dev)
 		return -EINVAL;
 
-	if (copy_from_user(&prl, data, sizeof(prl)))
+	if (copy_from_user(&prl, ifr->ifr_ifru.ifru_data, sizeof(prl)))
 		return -EFAULT;
 
 	switch (cmd) {
@@ -710,8 +709,6 @@ static int ipip6_rcv(struct sk_buff *skb)
 		 * old iph is no longer valid
 		 */
 		iph = (const struct iphdr *)skb_mac_header(skb);
-		skb_reset_mac_header(skb);
-
 		err = IP_ECN_decapsulate(iph, skb);
 		if (unlikely(err)) {
 			if (log_ecn_error)
@@ -782,8 +779,6 @@ static int sit_tunnel_rcv(struct sk_buff *skb, u8 ipproto)
 			tpi = &ipip_tpi;
 		if (iptunnel_pull_header(skb, 0, tpi->proto, false))
 			goto drop;
-		skb_reset_mac_header(skb);
-
 		return ip_tunnel_rcv(tunnel, skb, tpi, NULL, log_ecn_error);
 	}
 
@@ -977,7 +972,7 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 	if (df) {
 		mtu = dst_mtu(&rt->dst) - t_hlen;
 
-		if (mtu < IPV4_MIN_MTU) {
+		if (mtu < 68) {
 			dev->stats.collisions++;
 			ip_rt_put(rt);
 			goto tx_error;
@@ -992,7 +987,7 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 			skb_dst_update_pmtu_no_confirm(skb, mtu);
 
 		if (skb->len > mtu && !skb_is_gso(skb)) {
-			icmpv6_ndo_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu);
+			icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu);
 			ip_rt_put(rt);
 			goto tx_error;
 		}
@@ -1197,14 +1192,14 @@ static int ipip6_tunnel_update_6rd(struct ip_tunnel *t,
 }
 
 static int
-ipip6_tunnel_get6rd(struct net_device *dev, struct ip_tunnel_parm __user *data)
+ipip6_tunnel_get6rd(struct net_device *dev, struct ifreq *ifr)
 {
 	struct ip_tunnel *t = netdev_priv(dev);
 	struct ip_tunnel_6rd ip6rd;
 	struct ip_tunnel_parm p;
 
 	if (dev == dev_to_sit_net(dev)->fb_tunnel_dev) {
-		if (copy_from_user(&p, data, sizeof(p)))
+		if (copy_from_user(&p, ifr->ifr_ifru.ifru_data, sizeof(p)))
 			return -EFAULT;
 		t = ipip6_tunnel_locate(t->net, &p, 0);
 	}
@@ -1215,14 +1210,13 @@ ipip6_tunnel_get6rd(struct net_device *dev, struct ip_tunnel_parm __user *data)
 	ip6rd.relay_prefix = t->ip6rd.relay_prefix;
 	ip6rd.prefixlen = t->ip6rd.prefixlen;
 	ip6rd.relay_prefixlen = t->ip6rd.relay_prefixlen;
-	if (copy_to_user(data, &ip6rd, sizeof(ip6rd)))
+	if (copy_to_user(ifr->ifr_ifru.ifru_data, &ip6rd, sizeof(ip6rd)))
 		return -EFAULT;
 	return 0;
 }
 
 static int
-ipip6_tunnel_6rdctl(struct net_device *dev, struct ip_tunnel_6rd __user *data,
-		    int cmd)
+ipip6_tunnel_6rdctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
 	struct ip_tunnel *t = netdev_priv(dev);
 	struct ip_tunnel_6rd ip6rd;
@@ -1230,7 +1224,7 @@ ipip6_tunnel_6rdctl(struct net_device *dev, struct ip_tunnel_6rd __user *data,
 
 	if (!ns_capable(t->net->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
-	if (copy_from_user(&ip6rd, data, sizeof(ip6rd)))
+	if (copy_from_user(&ip6rd, ifr->ifr_ifru.ifru_data, sizeof(ip6rd)))
 		return -EFAULT;
 
 	if (cmd != SIOCDEL6RD) {
@@ -1369,28 +1363,27 @@ ipip6_tunnel_ctl(struct net_device *dev, struct ip_tunnel_parm *p, int cmd)
 }
 
 static int
-ipip6_tunnel_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
-			    void __user *data, int cmd)
+ipip6_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
 	switch (cmd) {
 	case SIOCGETTUNNEL:
 	case SIOCADDTUNNEL:
 	case SIOCCHGTUNNEL:
 	case SIOCDELTUNNEL:
-		return ip_tunnel_siocdevprivate(dev, ifr, data, cmd);
+		return ip_tunnel_ioctl(dev, ifr, cmd);
 	case SIOCGETPRL:
-		return ipip6_tunnel_get_prl(dev, data);
+		return ipip6_tunnel_get_prl(dev, ifr);
 	case SIOCADDPRL:
 	case SIOCDELPRL:
 	case SIOCCHGPRL:
-		return ipip6_tunnel_prl_ctl(dev, data, cmd);
+		return ipip6_tunnel_prl_ctl(dev, ifr, cmd);
 #ifdef CONFIG_IPV6_SIT_6RD
 	case SIOCGET6RD:
-		return ipip6_tunnel_get6rd(dev, data);
+		return ipip6_tunnel_get6rd(dev, ifr);
 	case SIOCADD6RD:
 	case SIOCCHG6RD:
 	case SIOCDEL6RD:
-		return ipip6_tunnel_6rdctl(dev, data, cmd);
+		return ipip6_tunnel_6rdctl(dev, ifr, cmd);
 #endif
 	default:
 		return -EINVAL;
@@ -1401,8 +1394,8 @@ static const struct net_device_ops ipip6_netdev_ops = {
 	.ndo_init	= ipip6_tunnel_init,
 	.ndo_uninit	= ipip6_tunnel_uninit,
 	.ndo_start_xmit	= sit_tunnel_xmit,
-	.ndo_siocdevprivate = ipip6_tunnel_siocdevprivate,
-	.ndo_get_stats64 = dev_get_tstats64,
+	.ndo_do_ioctl	= ipip6_tunnel_ioctl,
+	.ndo_get_stats64 = ip_tunnel_get_stats64,
 	.ndo_get_iflink = ip_tunnel_get_iflink,
 	.ndo_tunnel_ctl = ipip6_tunnel_ctl,
 };
@@ -1463,7 +1456,7 @@ static int ipip6_tunnel_init(struct net_device *dev)
 		dev->tstats = NULL;
 		return err;
 	}
-	dev_hold(dev);
+
 	return 0;
 }
 
@@ -1479,6 +1472,7 @@ static void __net_init ipip6_fb_tunnel_init(struct net_device *dev)
 	iph->ihl		= 5;
 	iph->ttl		= 64;
 
+	dev_hold(dev);
 	rcu_assign_pointer(sitn->tunnels_wc[0], tunnel);
 }
 
@@ -1651,11 +1645,8 @@ static int ipip6_newlink(struct net *src_net, struct net_device *dev,
 	}
 
 #ifdef CONFIG_IPV6_SIT_6RD
-	if (ipip6_netlink_6rd_parms(data, &ip6rd)) {
+	if (ipip6_netlink_6rd_parms(data, &ip6rd))
 		err = ipip6_tunnel_update_6rd(nt, &ip6rd);
-		if (err < 0)
-			unregister_netdevice_queue(dev, NULL);
-	}
 #endif
 
 	return err;
@@ -1873,9 +1864,9 @@ static void __net_exit sit_destroy_tunnels(struct net *net,
 		if (dev->rtnl_link_ops == &sit_link_ops)
 			unregister_netdevice_queue(dev, head);
 
-	for (prio = 0; prio < 4; prio++) {
+	for (prio = 1; prio < 4; prio++) {
 		int h;
-		for (h = 0; h < (prio ? IP6_SIT_HASH_SIZE : 1); h++) {
+		for (h = 0; h < IP6_SIT_HASH_SIZE; h++) {
 			struct ip_tunnel *t;
 
 			t = rtnl_dereference(sitn->tunnels[prio][h]);

@@ -771,6 +771,7 @@ static int lm3554_gpio_init(struct i2c_client *client)
 	ret = gpiod_direction_output(pdata->gpio_reset, 0);
 	if (ret < 0)
 		return ret;
+	dev_info(&client->dev, "flash led reset successfully\n");
 
 	if (!pdata->gpio_strobe)
 		return -EINVAL;
@@ -782,7 +783,7 @@ static int lm3554_gpio_init(struct i2c_client *client)
 	return 0;
 }
 
-static void lm3554_gpio_uninit(struct i2c_client *client)
+static int lm3554_gpio_uninit(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct lm3554 *flash = to_lm3554(sd);
@@ -791,13 +792,13 @@ static void lm3554_gpio_uninit(struct i2c_client *client)
 
 	ret = gpiod_direction_output(pdata->gpio_strobe, 0);
 	if (ret < 0)
-		dev_err(&client->dev,
-			"gpio request/direction_output fail for gpio_strobe");
+		return ret;
 
 	ret = gpiod_direction_output(pdata->gpio_reset, 0);
 	if (ret < 0)
-		dev_err(&client->dev,
-			"gpio request/direction_output fail for gpio_reset");
+		return ret;
+
+	return 0;
 }
 
 static void *lm3554_platform_data_func(struct i2c_client *client)
@@ -842,10 +843,8 @@ static int lm3554_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	flash->pdata = lm3554_platform_data_func(client);
-	if (IS_ERR(flash->pdata)) {
-		err = PTR_ERR(flash->pdata);
-		goto fail1;
-	}
+	if (IS_ERR(flash->pdata))
+		return PTR_ERR(flash->pdata);
 
 	v4l2_i2c_subdev_init(&flash->sd, client, &lm3554_ops);
 	flash->sd.internal_ops = &lm3554_internal_ops;
@@ -857,7 +856,7 @@ static int lm3554_probe(struct i2c_client *client)
 				   ARRAY_SIZE(lm3554_controls));
 	if (ret) {
 		dev_err(&client->dev, "error initialize a ctrl_handler.\n");
-		goto fail3;
+		goto fail2;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(lm3554_controls); i++)
@@ -866,14 +865,14 @@ static int lm3554_probe(struct i2c_client *client)
 
 	if (flash->ctrl_handler.error) {
 		dev_err(&client->dev, "ctrl_handler error.\n");
-		goto fail3;
+		goto fail2;
 	}
 
 	flash->sd.ctrl_handler = &flash->ctrl_handler;
 	err = media_entity_pads_init(&flash->sd.entity, 0, NULL);
 	if (err) {
 		dev_err(&client->dev, "error initialize a media entity.\n");
-		goto fail2;
+		goto fail1;
 	}
 
 	flash->sd.entity.function = MEDIA_ENT_F_FLASH;
@@ -885,15 +884,14 @@ static int lm3554_probe(struct i2c_client *client)
 	err = lm3554_gpio_init(client);
 	if (err) {
 		dev_err(&client->dev, "gpio request/direction_output fail");
-		goto fail3;
+		goto fail2;
 	}
 	return atomisp_register_i2c_module(&flash->sd, NULL, LED_FLASH);
-fail3:
+fail2:
 	media_entity_cleanup(&flash->sd.entity);
 	v4l2_ctrl_handler_free(&flash->ctrl_handler);
-fail2:
-	v4l2_device_unregister_subdev(&flash->sd);
 fail1:
+	v4l2_device_unregister_subdev(&flash->sd);
 	kfree(flash);
 
 	return err;
@@ -903,6 +901,7 @@ static int lm3554_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct lm3554 *flash = to_lm3554(sd);
+	int ret;
 
 	media_entity_cleanup(&flash->sd.entity);
 	v4l2_ctrl_handler_free(&flash->ctrl_handler);
@@ -912,11 +911,16 @@ static int lm3554_remove(struct i2c_client *client)
 
 	del_timer_sync(&flash->flash_off_delay);
 
-	lm3554_gpio_uninit(client);
+	ret = lm3554_gpio_uninit(client);
+	if (ret < 0)
+		goto fail;
 
 	kfree(flash);
 
 	return 0;
+fail:
+	dev_err(&client->dev, "gpio request/direction_output fail");
+	return ret;
 }
 
 static const struct dev_pm_ops lm3554_pm_ops = {

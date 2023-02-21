@@ -417,22 +417,19 @@ static int enh_desc_get_rx_timestamp_status(void *desc, void *next_desc,
 	}
 }
 
-static void enh_desc_display_ring(void *head, unsigned int size, bool rx,
-				  dma_addr_t dma_rx_phy, unsigned int desc_size)
+static void enh_desc_display_ring(void *head, unsigned int size, bool rx)
 {
 	struct dma_extended_desc *ep = (struct dma_extended_desc *)head;
-	dma_addr_t dma_addr;
 	int i;
 
 	pr_info("Extended %s descriptor ring:\n", rx ? "RX" : "TX");
 
 	for (i = 0; i < size; i++) {
 		u64 x;
-		dma_addr = dma_rx_phy + i * sizeof(*ep);
 
 		x = *(u64 *)ep;
-		pr_info("%03d [%pad]: 0x%x 0x%x 0x%x 0x%x\n",
-			i, &dma_addr,
+		pr_info("%03d [0x%x]: 0x%x 0x%x 0x%x 0x%x\n",
+			i, (unsigned int)virt_to_phys(ep),
 			(unsigned int)x, (unsigned int)(x >> 32),
 			ep->basic.des2, ep->basic.des3);
 		ep++;

@@ -189,13 +189,13 @@ static int submit_fence_sync(struct etnaviv_gem_submit *submit)
 			continue;
 
 		if (bo->flags & ETNA_SUBMIT_BO_WRITE) {
-			ret = dma_resv_get_fences(robj, &bo->excl,
-						  &bo->nr_shared,
-						  &bo->shared);
+			ret = dma_resv_get_fences_rcu(robj, &bo->excl,
+								&bo->nr_shared,
+								&bo->shared);
 			if (ret)
 				return ret;
 		} else {
-			bo->excl = dma_resv_get_excl_unlocked(robj);
+			bo->excl = dma_resv_get_excl_rcu(robj);
 		}
 
 	}
@@ -532,7 +532,8 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 		goto err_submit_objects;
 
 	submit->ctx = file->driver_priv;
-	submit->mmu_context = etnaviv_iommu_context_get(submit->ctx->mmu);
+	etnaviv_iommu_context_get(submit->ctx->mmu);
+	submit->mmu_context = submit->ctx->mmu;
 	submit->exec_state = args->exec_state;
 	submit->flags = args->flags;
 
@@ -611,10 +612,14 @@ err_submit_ww_acquire:
 err_submit_cmds:
 	if (ret && (out_fence_fd >= 0))
 		put_unused_fd(out_fence_fd);
-	kvfree(stream);
-	kvfree(bos);
-	kvfree(relocs);
-	kvfree(pmrs);
+	if (stream)
+		kvfree(stream);
+	if (bos)
+		kvfree(bos);
+	if (relocs)
+		kvfree(relocs);
+	if (pmrs)
+		kvfree(pmrs);
 
 	return ret;
 }

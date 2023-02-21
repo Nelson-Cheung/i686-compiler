@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  *
- * Copyright(c) 2003 - 2014, 2018 - 2021  Intel Corporation. All rights reserved.
+ * Copyright(c) 2003 - 2014, 2018 - 2020  Intel Corporation. All rights reserved.
  * Copyright(c) 2015 Intel Deutschland GmbH
  *
  * Portions of this file are derived from the ipw3945 project, as well
@@ -406,6 +406,7 @@ static void iwl_print_cont_event_trace(struct iwl_priv *priv, u32 base,
 	u32 i;
 	u32 ptr;        /* SRAM byte address of log data */
 	u32 ev, time, data; /* event log data */
+	unsigned long reg_flags;
 
 	if (mode == 0)
 		ptr = base + (4 * sizeof(u32)) + (start_idx * 2 * sizeof(u32));
@@ -413,7 +414,7 @@ static void iwl_print_cont_event_trace(struct iwl_priv *priv, u32 base,
 		ptr = base + (4 * sizeof(u32)) + (start_idx * 3 * sizeof(u32));
 
 	/* Make sure device is powered up for SRAM reads */
-	if (!iwl_trans_grab_nic_access(priv->trans))
+	if (!iwl_trans_grab_nic_access(priv->trans, &reg_flags))
 		return;
 
 	/* Set starting address; reads will auto-increment */
@@ -445,7 +446,7 @@ static void iwl_print_cont_event_trace(struct iwl_priv *priv, u32 base,
 		}
 	}
 	/* Allow device to power down */
-	iwl_trans_release_nic_access(priv->trans);
+	iwl_trans_release_nic_access(priv->trans, &reg_flags);
 }
 
 static void iwl_continuous_event_trace(struct iwl_priv *priv)
@@ -1693,6 +1694,7 @@ static int iwl_print_event_log(struct iwl_priv *priv, u32 start_idx,
 	u32 event_size; /* 2 u32s, or 3 u32s if timestamp recorded */
 	u32 ptr;        /* SRAM byte address of log data */
 	u32 ev, time, data; /* event log data */
+	unsigned long reg_flags;
 
 	struct iwl_trans *trans = priv->trans;
 
@@ -1716,7 +1718,7 @@ static int iwl_print_event_log(struct iwl_priv *priv, u32 start_idx,
 	ptr = base + EVENT_START_OFFSET + (start_idx * event_size);
 
 	/* Make sure device is powered up for SRAM reads */
-	if (!iwl_trans_grab_nic_access(trans))
+	if (!iwl_trans_grab_nic_access(trans, &reg_flags))
 		return pos;
 
 	/* Set starting address; reads will auto-increment */
@@ -1755,7 +1757,7 @@ static int iwl_print_event_log(struct iwl_priv *priv, u32 start_idx,
 	}
 
 	/* Allow device to power down */
-	iwl_trans_release_nic_access(trans);
+	iwl_trans_release_nic_access(trans, &reg_flags);
 	return pos;
 }
 
@@ -1950,7 +1952,7 @@ static void iwlagn_fw_error(struct iwl_priv *priv, bool ondemand)
 	}
 }
 
-static void iwl_nic_error(struct iwl_op_mode *op_mode, bool sync)
+static void iwl_nic_error(struct iwl_op_mode *op_mode)
 {
 	struct iwl_priv *priv = IWL_OP_MODE_GET_DVM(op_mode);
 

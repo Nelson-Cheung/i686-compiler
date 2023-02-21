@@ -434,7 +434,6 @@ enum {
 	TCA_HTB_RATE64,
 	TCA_HTB_CEIL64,
 	TCA_HTB_PAD,
-	TCA_HTB_OFFLOAD,
 	__TCA_HTB_MAX,
 };
 
@@ -826,8 +825,6 @@ struct tc_codel_xstats {
 };
 
 /* FQ_CODEL */
-
-#define FQ_CODEL_QUANTUM_MAX (1 << 20)
 
 enum {
 	TCA_FQ_CODEL_UNSPEC,

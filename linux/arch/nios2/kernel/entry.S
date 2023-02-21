@@ -389,10 +389,7 @@ ENTRY(ret_from_interrupt)
  */
 ENTRY(sys_clone)
 	SAVE_SWITCH_STACK
-	subi    sp, sp, 4 /* make space for tls pointer */
-	stw     r8, 0(sp) /* pass tls pointer (r8) via stack (5th argument) */
 	call	nios2_clone
-	addi    sp, sp, 4
 	RESTORE_SWITCH_STACK
 	ret
 

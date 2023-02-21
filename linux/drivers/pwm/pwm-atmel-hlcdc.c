@@ -265,9 +265,12 @@ static int atmel_hlcdc_pwm_probe(struct platform_device *pdev)
 	chip->hlcdc = hlcdc;
 	chip->chip.ops = &atmel_hlcdc_pwm_ops;
 	chip->chip.dev = dev;
+	chip->chip.base = -1;
 	chip->chip.npwm = 1;
+	chip->chip.of_xlate = of_pwm_xlate_with_flags;
+	chip->chip.of_pwm_n_cells = 3;
 
-	ret = pwmchip_add(&chip->chip);
+	ret = pwmchip_add_with_polarity(&chip->chip, PWM_POLARITY_INVERSED);
 	if (ret) {
 		clk_disable_unprepare(hlcdc->periph_clk);
 		return ret;
@@ -281,8 +284,11 @@ static int atmel_hlcdc_pwm_probe(struct platform_device *pdev)
 static int atmel_hlcdc_pwm_remove(struct platform_device *pdev)
 {
 	struct atmel_hlcdc_pwm *chip = platform_get_drvdata(pdev);
+	int ret;
 
-	pwmchip_remove(&chip->chip);
+	ret = pwmchip_remove(&chip->chip);
+	if (ret)
+		return ret;
 
 	clk_disable_unprepare(chip->hlcdc->periph_clk);
 

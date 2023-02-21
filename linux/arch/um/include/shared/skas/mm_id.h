@@ -12,7 +12,6 @@ struct mm_id {
 		int pid;
 	} u;
 	unsigned long stack;
-	int kill;
 };
 
 #endif

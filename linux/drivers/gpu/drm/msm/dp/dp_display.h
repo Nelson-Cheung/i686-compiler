@@ -8,7 +8,6 @@
 
 #include "dp_panel.h"
 #include <sound/hdmi-codec.h>
-#include "disp/msm_disp_snapshot.h"
 
 struct msm_dp {
 	struct drm_device *drm_dev;
@@ -35,7 +34,6 @@ int dp_display_get_modes(struct msm_dp *dp_display,
 int dp_display_request_irq(struct msm_dp *dp_display);
 bool dp_display_check_video_test(struct msm_dp *dp_display);
 int dp_display_get_test_bpp(struct msm_dp *dp_display);
-void dp_display_signal_audio_start(struct msm_dp *dp_display);
 void dp_display_signal_audio_complete(struct msm_dp *dp_display);
 
 #endif /* _DP_DISPLAY_H_ */

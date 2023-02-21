@@ -74,8 +74,8 @@
 	status = "okay";
 };
 
-&nand_controller {
-	nand@0 {
+&nand {
+	nandcs@0 {
 		compatible = "brcm,nandcs";
 		reg = <0>;
 		nand-on-flash-bbt;
@@ -177,8 +177,4 @@
 
 &xhci {
 	status = "okay";
-};
-
-&srab {
-	compatible = "brcm,bcm58522-srab", "brcm,nsp-srab";
 };

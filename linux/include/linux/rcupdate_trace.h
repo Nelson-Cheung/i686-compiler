@@ -11,9 +11,9 @@
 #include <linux/sched.h>
 #include <linux/rcupdate.h>
 
-extern struct lockdep_map rcu_trace_lock_map;
-
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
+
+extern struct lockdep_map rcu_trace_lock_map;
 
 static inline int rcu_read_lock_trace_held(void)
 {

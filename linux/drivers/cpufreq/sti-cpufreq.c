@@ -223,8 +223,7 @@ use_defaults:
 	opp_table = dev_pm_opp_set_supported_hw(dev, version, VERSION_ELEMENTS);
 	if (IS_ERR(opp_table)) {
 		dev_err(dev, "Failed to set supported hardware\n");
-		ret = PTR_ERR(opp_table);
-		goto err_put_prop_name;
+		return PTR_ERR(opp_table);
 	}
 
 	dev_dbg(dev, "pcode: %d major: %d minor: %d substrate: %d\n",
@@ -233,10 +232,6 @@ use_defaults:
 		version[0], version[1], version[2]);
 
 	return 0;
-
-err_put_prop_name:
-	dev_pm_opp_put_prop_name(opp_table);
-	return ret;
 }
 
 static int sti_cpufreq_fetch_syscon_registers(void)
@@ -296,13 +291,6 @@ register_cpufreq_dt:
 	return 0;
 }
 module_init(sti_cpufreq_init);
-
-static const struct of_device_id __maybe_unused sti_cpufreq_of_match[] = {
-	{ .compatible = "st,stih407" },
-	{ .compatible = "st,stih410" },
-	{ },
-};
-MODULE_DEVICE_TABLE(of, sti_cpufreq_of_match);
 
 MODULE_DESCRIPTION("STMicroelectronics CPUFreq/OPP driver");
 MODULE_AUTHOR("Ajitpal Singh <ajitpal.singh@st.com>");

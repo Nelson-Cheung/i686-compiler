@@ -15,7 +15,6 @@ properties:
     enum:
       - ti,j721e-wiz-16g
       - ti,j721e-wiz-10g
-      - ti,am64-wiz-10g
 
   power-domains:
     maxItems: 1
@@ -41,9 +40,6 @@ properties:
     const: 1
 
   "#reset-cells":
-    const: 1
-
-  "#clock-cells":
     const: 1
 
   ranges: true
@@ -76,34 +72,6 @@ properties:
       If not specified, the default debounce of 100ms will be used.
       Type-C spec states minimum CC pin debounce of 100 ms and maximum
       of 200 ms. However, some solutions might need more than 200 ms.
-
-  refclk-dig:
-    type: object
-    description: |
-      WIZ node should have subnode for refclk_dig to select the reference
-      clock source for the reference clock used in the PHY and PMA digital
-      logic.
-    properties:
-      clocks:
-        minItems: 2
-        maxItems: 4
-        description: Phandle to two (Torrent) or four (Sierra) clock nodes representing
-          the inputs to refclk_dig
-
-      "#clock-cells":
-        const: 0
-
-      assigned-clocks:
-        maxItems: 1
-
-      assigned-clock-parents:
-        maxItems: 1
-
-    required:
-      - clocks
-      - "#clock-cells"
-      - assigned-clocks
-      - assigned-clock-parents
 
 patternProperties:
   "^pll[0|1]-refclk$":
@@ -149,13 +117,41 @@ patternProperties:
       - clocks
       - "#clock-cells"
 
+  "^refclk-dig$":
+    type: object
+    description: |
+      WIZ node should have subnode for refclk_dig to select the reference
+      clock source for the reference clock used in the PHY and PMA digital
+      logic.
+    properties:
+      clocks:
+        minItems: 2
+        maxItems: 4
+        description: Phandle to two (Torrent) or four (Sierra) clock nodes representing
+          the inputs to refclk_dig
+
+      "#clock-cells":
+        const: 0
+
+      assigned-clocks:
+        maxItems: 1
+
+      assigned-clock-parents:
+        maxItems: 1
+
+    required:
+      - clocks
+      - "#clock-cells"
+      - assigned-clocks
+      - assigned-clock-parents
+
   "^serdes@[0-9a-f]+$":
     type: object
     description: |
       WIZ node should have '1' subnode for the SERDES. It could be either
       Sierra SERDES or Torrent SERDES. Sierra SERDES should follow the
       bindings specified in
-      Documentation/devicetree/bindings/phy/phy-cadence-sierra.yaml
+      Documentation/devicetree/bindings/phy/phy-cadence-sierra.txt
       Torrent SERDES should follow the bindings specified in
       Documentation/devicetree/bindings/phy/phy-cadence-torrent.yaml
 
@@ -222,7 +218,7 @@ examples:
            };
 
            serdes@5000000 {
-                  compatible = "ti,sierra-phy-t0";
+                  compatible = "cdns,ti,sierra-phy-t0";
                   reg-names = "serdes";
                   reg = <0x5000000 0x10000>;
                   #address-cells = <1>;

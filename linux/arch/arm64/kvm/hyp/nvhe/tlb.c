@@ -8,8 +8,6 @@
 #include <asm/kvm_mmu.h>
 #include <asm/tlbflush.h>
 
-#include <nvhe/mem_protect.h>
-
 struct tlb_inv_context {
 	u64		tcr;
 };
@@ -34,18 +32,18 @@ static void __tlb_switch_to_guest(struct kvm_s2_mmu *mmu,
 	}
 
 	/*
-	 * __load_stage2() includes an ISB only when the AT
+	 * __load_guest_stage2() includes an ISB only when the AT
 	 * workaround is applied. Take care of the opposite condition,
 	 * ensuring that we always have an ISB, but not two ISBs back
 	 * to back.
 	 */
-	__load_stage2(mmu, kern_hyp_va(mmu->arch));
+	__load_guest_stage2(mmu);
 	asm(ALTERNATIVE("isb", "nop", ARM64_WORKAROUND_SPECULATIVE_AT));
 }
 
 static void __tlb_switch_to_host(struct tlb_inv_context *cxt)
 {
-	__load_host_stage2();
+	write_sysreg(0, vttbr_el2);
 
 	if (cpus_have_final_cap(ARM64_WORKAROUND_SPECULATIVE_AT)) {
 		/* Ensure write of the host VMID */
@@ -104,7 +102,7 @@ void __kvm_tlb_flush_vmid_ipa(struct kvm_s2_mmu *mmu,
 	 * you should be running with VHE enabled.
 	 */
 	if (icache_is_vpipt())
-		icache_inval_all_pou();
+		__flush_icache_all();
 
 	__tlb_switch_to_host(&cxt);
 }
@@ -125,7 +123,7 @@ void __kvm_tlb_flush_vmid(struct kvm_s2_mmu *mmu)
 	__tlb_switch_to_host(&cxt);
 }
 
-void __kvm_flush_cpu_context(struct kvm_s2_mmu *mmu)
+void __kvm_tlb_flush_local_vmid(struct kvm_s2_mmu *mmu)
 {
 	struct tlb_inv_context cxt;
 
@@ -133,7 +131,6 @@ void __kvm_flush_cpu_context(struct kvm_s2_mmu *mmu)
 	__tlb_switch_to_guest(mmu, &cxt);
 
 	__tlbi(vmalle1);
-	asm volatile("ic iallu");
 	dsb(nsh);
 	isb();
 

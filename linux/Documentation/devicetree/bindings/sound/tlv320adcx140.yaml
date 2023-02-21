@@ -24,10 +24,10 @@ description: |
 
 properties:
   compatible:
-    enum:
-      - ti,tlv320adc3140
-      - ti,tlv320adc5140
-      - ti,tlv320adc6140
+    oneOf:
+      - const: ti,tlv320adc3140
+      - const: ti,tlv320adc5140
+      - const: ti,tlv320adc6140
 
   reg:
     maxItems: 1
@@ -35,7 +35,6 @@ properties:
       I2C addresss of the device can be one of these 0x4c, 0x4d, 0x4e or 0x4f
 
   reset-gpios:
-    maxItems: 1
     description: |
       GPIO used for hardware reset.
 

@@ -10,8 +10,6 @@ m68k Architecture
    kernel-options
    buddha-driver
 
-   features
-
 .. only::  subproject and html
 
    Indices

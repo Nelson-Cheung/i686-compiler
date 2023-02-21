@@ -74,8 +74,9 @@ int ioprio_check_cap(int ioprio)
 			fallthrough;
 			/* rt has prio field too */
 		case IOPRIO_CLASS_BE:
-			if (data >= IOPRIO_NR_LEVELS || data < 0)
+			if (data >= IOPRIO_BE_NR || data < 0)
 				return -EINVAL;
+
 			break;
 		case IOPRIO_CLASS_IDLE:
 			break;
@@ -118,17 +119,11 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 				pgrp = task_pgrp(current);
 			else
 				pgrp = find_vpid(who);
-
-			read_lock(&tasklist_lock);
 			do_each_pid_thread(pgrp, PIDTYPE_PGID, p) {
 				ret = set_task_ioprio(p, ioprio);
-				if (ret) {
-					read_unlock(&tasklist_lock);
-					goto out;
-				}
+				if (ret)
+					break;
 			} while_each_pid_thread(pgrp, PIDTYPE_PGID, p);
-			read_unlock(&tasklist_lock);
-
 			break;
 		case IOPRIO_WHO_USER:
 			uid = make_kuid(current_user_ns(), who);
@@ -158,7 +153,6 @@ free_uid:
 			ret = -EINVAL;
 	}
 
-out:
 	rcu_read_unlock();
 	return ret;
 }
@@ -170,7 +164,7 @@ static int get_task_ioprio(struct task_struct *p)
 	ret = security_task_getioprio(p);
 	if (ret)
 		goto out;
-	ret = IOPRIO_DEFAULT;
+	ret = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, IOPRIO_NORM);
 	task_lock(p);
 	if (p->io_context)
 		ret = p->io_context->ioprio;
@@ -182,9 +176,9 @@ out:
 int ioprio_best(unsigned short aprio, unsigned short bprio)
 {
 	if (!ioprio_valid(aprio))
-		aprio = IOPRIO_DEFAULT;
+		aprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, IOPRIO_NORM);
 	if (!ioprio_valid(bprio))
-		bprio = IOPRIO_DEFAULT;
+		bprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, IOPRIO_NORM);
 
 	return min(aprio, bprio);
 }

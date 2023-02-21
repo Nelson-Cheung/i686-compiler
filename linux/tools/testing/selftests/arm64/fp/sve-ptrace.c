@@ -332,5 +332,5 @@ int main(void)
 
 	ksft_print_cnts();
 
-	return ret;
+	return 0;
 }

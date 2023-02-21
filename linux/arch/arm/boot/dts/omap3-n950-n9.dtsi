@@ -494,11 +494,3 @@
 		clock-names = "sysclk";
 	};
 };
-
-&aes1_target {
-	status = "disabled";
-};
-
-&aes2_target {
-	status = "disabled";
-};

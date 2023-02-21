@@ -1196,7 +1196,7 @@ static int sc16is7xx_probe(struct device *dev,
 	ret = regmap_read(regmap,
 			  SC16IS7XX_LSR_REG << SC16IS7XX_REG_SHIFT, &val);
 	if (ret < 0)
-		return -EPROBE_DEFER;
+		return ret;
 
 	/* Alloc port structure */
 	s = devm_kzalloc(dev, struct_size(s, p, devtype->nr_uart), GFP_KERNEL);
@@ -1208,16 +1208,8 @@ static int sc16is7xx_probe(struct device *dev,
 	/* Always ask for fixed clock rate from a property. */
 	device_property_read_u32(dev, "clock-frequency", &uartclk);
 
-	s->clk = devm_clk_get_optional(dev, NULL);
-	if (IS_ERR(s->clk))
-		return PTR_ERR(s->clk);
-
-	ret = clk_prepare_enable(s->clk);
-	if (ret)
-		return ret;
-
-	freq = clk_get_rate(s->clk);
-	if (freq == 0) {
+	s->clk = devm_clk_get(dev, NULL);
+	if (IS_ERR(s->clk)) {
 		if (uartclk)
 			freq = uartclk;
 		if (pfreq)
@@ -1225,7 +1217,13 @@ static int sc16is7xx_probe(struct device *dev,
 		if (freq)
 			dev_dbg(dev, "Clock frequency: %luHz\n", freq);
 		else
-			return -EINVAL;
+			return PTR_ERR(s->clk);
+	} else {
+		ret = clk_prepare_enable(s->clk);
+		if (ret)
+			return ret;
+
+		freq = clk_get_rate(s->clk);
 	}
 
 	s->regmap = regmap;
@@ -1360,7 +1358,8 @@ out_thread:
 	kthread_stop(s->kworker_task);
 
 out_clk:
-	clk_disable_unprepare(s->clk);
+	if (!IS_ERR(s->clk))
+		clk_disable_unprepare(s->clk);
 
 	return ret;
 }
@@ -1384,7 +1383,8 @@ static int sc16is7xx_remove(struct device *dev)
 	kthread_flush_worker(&s->kworker);
 	kthread_stop(s->kworker_task);
 
-	clk_disable_unprepare(s->clk);
+	if (!IS_ERR(s->clk))
+		clk_disable_unprepare(s->clk);
 
 	return 0;
 }

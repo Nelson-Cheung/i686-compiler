@@ -178,7 +178,6 @@ mktables
 mktree
 mkutf8data
 modpost
-modules-only.symvers
 modules.builtin
 modules.builtin.modinfo
 modules.nsdeps
@@ -253,7 +252,6 @@ vmlinux-*
 vmlinux.aout
 vmlinux.bin.all
 vmlinux.lds
-vmlinux.map
 vmlinux.symvers
 vmlinuz
 voffset.h

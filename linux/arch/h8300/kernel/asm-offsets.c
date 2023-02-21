@@ -21,6 +21,7 @@
 int main(void)
 {
 	/* offsets into the task struct */
+	OFFSET(TASK_STATE, task_struct, state);
 	OFFSET(TASK_FLAGS, task_struct, flags);
 	OFFSET(TASK_PTRACE, task_struct, ptrace);
 	OFFSET(TASK_BLOCKED, task_struct, blocked);
@@ -62,9 +63,6 @@ int main(void)
 	OFFSET(TI_FLAGS, thread_info, flags);
 	OFFSET(TI_CPU, thread_info, cpu);
 	OFFSET(TI_PRE, thread_info, preempt_count);
-#ifdef CONFIG_PREEMPTION
-	DEFINE(TI_PRE_COUNT, offsetof(struct thread_info, preempt_count));
-#endif
 
 	return 0;
 }

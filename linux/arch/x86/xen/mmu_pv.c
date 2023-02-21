@@ -1247,8 +1247,8 @@ static void xen_flush_tlb_one_user(unsigned long addr)
 	preempt_enable();
 }
 
-static void xen_flush_tlb_multi(const struct cpumask *cpus,
-				const struct flush_tlb_info *info)
+static void xen_flush_tlb_others(const struct cpumask *cpus,
+				 const struct flush_tlb_info *info)
 {
 	struct {
 		struct mmuext_op op;
@@ -1258,7 +1258,7 @@ static void xen_flush_tlb_multi(const struct cpumask *cpus,
 	const size_t mc_entry_size = sizeof(args->op) +
 		sizeof(args->mask[0]) * BITS_TO_LONGS(num_possible_cpus());
 
-	trace_xen_mmu_flush_tlb_multi(cpus, info->mm, info->start, info->end);
+	trace_xen_mmu_flush_tlb_others(cpus, info->mm, info->start, info->end);
 
 	if (cpumask_empty(cpus))
 		return;		/* nothing to do */
@@ -1267,8 +1267,9 @@ static void xen_flush_tlb_multi(const struct cpumask *cpus,
 	args = mcs.args;
 	args->op.arg2.vcpumask = to_cpumask(args->mask);
 
-	/* Remove any offline CPUs */
+	/* Remove us, and any offline CPUS. */
 	cpumask_and(to_cpumask(args->mask), cpus, cpu_online_mask);
+	cpumask_clear_cpu(smp_processor_id(), to_cpumask(args->mask));
 
 	args->op.cmd = MMUEXT_TLB_FLUSH_MULTI;
 	if (info->end != TLB_FLUSH_ALL &&
@@ -1518,17 +1519,14 @@ static inline void xen_alloc_ptpage(struct mm_struct *mm, unsigned long pfn,
 	if (pinned) {
 		struct page *page = pfn_to_page(pfn);
 
-		pinned = false;
-		if (static_branch_likely(&xen_struct_pages_ready)) {
-			pinned = PagePinned(page);
+		if (static_branch_likely(&xen_struct_pages_ready))
 			SetPagePinned(page);
-		}
 
 		xen_mc_batch();
 
 		__set_pfn_prot(pfn, PAGE_KERNEL_RO);
 
-		if (level == PT_PTE && USE_SPLIT_PTE_PTLOCKS && !pinned)
+		if (level == PT_PTE && USE_SPLIT_PTE_PTLOCKS)
 			__pin_pagetable_pfn(MMUEXT_PIN_L1_TABLE, pfn);
 
 		xen_mc_issue(PARAVIRT_LAZY_MMU);
@@ -2088,7 +2086,7 @@ static const struct pv_mmu_ops xen_mmu_ops __initconst = {
 	.flush_tlb_user = xen_flush_tlb,
 	.flush_tlb_kernel = xen_flush_tlb,
 	.flush_tlb_one_user = xen_flush_tlb_one_user,
-	.flush_tlb_multi = xen_flush_tlb_multi,
+	.flush_tlb_others = xen_flush_tlb_others,
 	.tlb_remove_table = tlb_remove_table,
 
 	.pgd_alloc = xen_pgd_alloc,
@@ -2102,8 +2100,8 @@ static const struct pv_mmu_ops xen_mmu_ops __initconst = {
 	.set_pte = xen_set_pte_init,
 	.set_pmd = xen_set_pmd_hyper,
 
-	.ptep_modify_prot_start = xen_ptep_modify_prot_start,
-	.ptep_modify_prot_commit = xen_ptep_modify_prot_commit,
+	.ptep_modify_prot_start = __ptep_modify_prot_start,
+	.ptep_modify_prot_commit = __ptep_modify_prot_commit,
 
 	.pte_val = PV_CALLEE_SAVE(xen_pte_val),
 	.pgd_val = PV_CALLEE_SAVE(xen_pgd_val),
@@ -2398,7 +2396,7 @@ static int remap_area_pfn_pte_fn(pte_t *ptep, unsigned long addr, void *data)
 
 int xen_remap_pfn(struct vm_area_struct *vma, unsigned long addr,
 		  xen_pfn_t *pfn, int nr, int *err_ptr, pgprot_t prot,
-		  unsigned int domid, bool no_translate)
+		  unsigned int domid, bool no_translate, struct page **pages)
 {
 	int err = 0;
 	struct remap_data rmd;
@@ -2412,7 +2410,7 @@ int xen_remap_pfn(struct vm_area_struct *vma, unsigned long addr,
 	rmd.prot = prot;
 	/*
 	 * We use the err_ptr to indicate if there we are doing a contiguous
-	 * mapping or a discontiguous mapping.
+	 * mapping or a discontigious mapping.
 	 */
 	rmd.contiguous = !err_ptr;
 	rmd.no_translate = no_translate;

@@ -86,11 +86,7 @@ static int __write_console(struct xencons_info *xencons,
 	cons = intf->out_cons;
 	prod = intf->out_prod;
 	mb();			/* update queue values before going on */
-
-	if ((prod - cons) > sizeof(intf->out)) {
-		pr_err_once("xencons: Illegal ring page indices");
-		return -EINVAL;
-	}
+	BUG_ON((prod - cons) > sizeof(intf->out));
 
 	while ((sent < len) && ((prod - cons) < sizeof(intf->out)))
 		intf->out[MASK_XENCONS_IDX(prod++, intf->out)] = data[sent++];
@@ -118,10 +114,7 @@ static int domU_write_console(uint32_t vtermno, const char *data, int len)
 	 */
 	while (len) {
 		int sent = __write_console(cons, data, len);
-
-		if (sent < 0)
-			return sent;
-
+		
 		data += sent;
 		len -= sent;
 
@@ -145,11 +138,7 @@ static int domU_read_console(uint32_t vtermno, char *buf, int len)
 	cons = intf->in_cons;
 	prod = intf->in_prod;
 	mb();			/* get pointers before reading ring */
-
-	if ((prod - cons) > sizeof(intf->in)) {
-		pr_err_once("xencons: Illegal ring page indices");
-		return -EINVAL;
-	}
+	BUG_ON((prod - cons) > sizeof(intf->in));
 
 	while (cons != prod && recv < len)
 		buf[recv++] = intf->in[MASK_XENCONS_IDX(cons++, intf->in)];
@@ -618,8 +607,10 @@ static int __init xenboot_console_setup(struct console *console, char *string)
 {
 	static struct xencons_info xenboot;
 
-	if (xen_initial_domain() || !xen_pv_domain())
+	if (xen_initial_domain())
 		return 0;
+	if (!xen_pv_domain())
+		return -ENODEV;
 
 	return xencons_info_pv_init(&xenboot, 0);
 }
@@ -630,16 +621,17 @@ static void xenboot_write_console(struct console *console, const char *string,
 	unsigned int linelen, off = 0;
 	const char *pos;
 
-	if (dom0_write_console(0, string, len) >= 0)
-		return;
-
 	if (!xen_pv_domain()) {
 		xen_hvm_early_write(0, string, len);
 		return;
 	}
 
-	if (domU_write_console(0, "(early) ", 8) < 0)
+	dom0_write_console(0, string, len);
+
+	if (xen_initial_domain())
 		return;
+
+	domU_write_console(0, "(early) ", 8);
 	while (off < len && NULL != (pos = strchr(string+off, '\n'))) {
 		linelen = pos-string+off;
 		if (off + linelen > len)

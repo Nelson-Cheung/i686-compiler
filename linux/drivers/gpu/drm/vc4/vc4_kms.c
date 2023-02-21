@@ -39,11 +39,7 @@ static struct vc4_ctm_state *to_vc4_ctm_state(struct drm_private_state *priv)
 
 struct vc4_hvs_state {
 	struct drm_private_state base;
-
-	struct {
-		unsigned in_use: 1;
-		struct drm_crtc_commit *pending_commit;
-	} fifo_state[HVS_NUM_CHANNELS];
+	unsigned int unassigned_channels;
 };
 
 static struct vc4_hvs_state *
@@ -187,32 +183,6 @@ vc4_ctm_commit(struct vc4_dev *vc4, struct drm_atomic_state *state)
 }
 
 static struct vc4_hvs_state *
-vc4_hvs_get_new_global_state(struct drm_atomic_state *state)
-{
-	struct vc4_dev *vc4 = to_vc4_dev(state->dev);
-	struct drm_private_state *priv_state;
-
-	priv_state = drm_atomic_get_new_private_obj_state(state, &vc4->hvs_channels);
-	if (IS_ERR(priv_state))
-		return ERR_CAST(priv_state);
-
-	return to_vc4_hvs_state(priv_state);
-}
-
-static struct vc4_hvs_state *
-vc4_hvs_get_old_global_state(struct drm_atomic_state *state)
-{
-	struct vc4_dev *vc4 = to_vc4_dev(state->dev);
-	struct drm_private_state *priv_state;
-
-	priv_state = drm_atomic_get_old_private_obj_state(state, &vc4->hvs_channels);
-	if (IS_ERR(priv_state))
-		return ERR_CAST(priv_state);
-
-	return to_vc4_hvs_state(priv_state);
-}
-
-static struct vc4_hvs_state *
 vc4_hvs_get_global_state(struct drm_atomic_state *state)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(state->dev);
@@ -332,15 +302,14 @@ static void vc5_hvs_pv_muxing_commit(struct vc4_dev *vc4,
 	}
 }
 
-static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
+static void
+vc4_atomic_complete_commit(struct drm_atomic_state *state)
 {
 	struct drm_device *dev = state->dev;
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	struct vc4_hvs *hvs = vc4->hvs;
-	struct drm_crtc_state *old_crtc_state;
 	struct drm_crtc_state *new_crtc_state;
 	struct drm_crtc *crtc;
-	struct vc4_hvs_state *old_hvs_state;
 	int i;
 
 	for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
@@ -356,26 +325,9 @@ static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
 	if (vc4->hvs->hvs5)
 		clk_set_min_rate(hvs->core_clk, 500000000);
 
-	old_hvs_state = vc4_hvs_get_old_global_state(state);
-	if (!old_hvs_state)
-		return;
+	drm_atomic_helper_wait_for_fences(dev, state, false);
 
-	for_each_old_crtc_in_state(state, crtc, old_crtc_state, i) {
-		struct vc4_crtc_state *vc4_crtc_state =
-			to_vc4_crtc_state(old_crtc_state);
-		unsigned int channel = vc4_crtc_state->assigned_channel;
-		int ret;
-
-		if (channel == VC4_HVS_CHANNEL_DISABLED)
-			continue;
-
-		if (!old_hvs_state->fifo_state[channel].in_use)
-			continue;
-
-		ret = drm_crtc_commit_wait(old_hvs_state->fifo_state[channel].pending_commit);
-		if (ret)
-			drm_err(dev, "Timed out waiting for commit\n");
-	}
+	drm_atomic_helper_wait_for_dependencies(state);
 
 	drm_atomic_helper_commit_modeset_disables(dev, state);
 
@@ -398,36 +350,124 @@ static void vc4_atomic_commit_tail(struct drm_atomic_state *state)
 
 	drm_atomic_helper_cleanup_planes(dev, state);
 
+	drm_atomic_helper_commit_cleanup_done(state);
+
 	if (vc4->hvs->hvs5)
 		clk_set_min_rate(hvs->core_clk, 0);
+
+	drm_atomic_state_put(state);
+
+	up(&vc4->async_modeset);
 }
 
-static int vc4_atomic_commit_setup(struct drm_atomic_state *state)
+static void commit_work(struct work_struct *work)
 {
-	struct drm_crtc_state *crtc_state;
-	struct vc4_hvs_state *hvs_state;
-	struct drm_crtc *crtc;
-	unsigned int i;
+	struct drm_atomic_state *state = container_of(work,
+						      struct drm_atomic_state,
+						      commit_work);
+	vc4_atomic_complete_commit(state);
+}
 
-	hvs_state = vc4_hvs_get_new_global_state(state);
-	if (!hvs_state)
-		return -EINVAL;
+/**
+ * vc4_atomic_commit - commit validated state object
+ * @dev: DRM device
+ * @state: the driver state object
+ * @nonblock: nonblocking commit
+ *
+ * This function commits a with drm_atomic_helper_check() pre-validated state
+ * object. This can still fail when e.g. the framebuffer reservation fails. For
+ * now this doesn't implement asynchronous commits.
+ *
+ * RETURNS
+ * Zero for success or -errno.
+ */
+static int vc4_atomic_commit(struct drm_device *dev,
+			     struct drm_atomic_state *state,
+			     bool nonblock)
+{
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
+	int ret;
 
-	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
-		struct vc4_crtc_state *vc4_crtc_state =
-			to_vc4_crtc_state(crtc_state);
-		unsigned int channel =
-			vc4_crtc_state->assigned_channel;
+	if (state->async_update) {
+		ret = down_interruptible(&vc4->async_modeset);
+		if (ret)
+			return ret;
 
-		if (channel == VC4_HVS_CHANNEL_DISABLED)
-			continue;
+		ret = drm_atomic_helper_prepare_planes(dev, state);
+		if (ret) {
+			up(&vc4->async_modeset);
+			return ret;
+		}
 
-		if (!hvs_state->fifo_state[channel].in_use)
-			continue;
+		drm_atomic_helper_async_commit(dev, state);
 
-		hvs_state->fifo_state[channel].pending_commit =
-			drm_crtc_commit_get(crtc_state->commit);
+		drm_atomic_helper_cleanup_planes(dev, state);
+
+		up(&vc4->async_modeset);
+
+		return 0;
 	}
+
+	/* We know for sure we don't want an async update here. Set
+	 * state->legacy_cursor_update to false to prevent
+	 * drm_atomic_helper_setup_commit() from auto-completing
+	 * commit->flip_done.
+	 */
+	state->legacy_cursor_update = false;
+	ret = drm_atomic_helper_setup_commit(state, nonblock);
+	if (ret)
+		return ret;
+
+	INIT_WORK(&state->commit_work, commit_work);
+
+	ret = down_interruptible(&vc4->async_modeset);
+	if (ret)
+		return ret;
+
+	ret = drm_atomic_helper_prepare_planes(dev, state);
+	if (ret) {
+		up(&vc4->async_modeset);
+		return ret;
+	}
+
+	if (!nonblock) {
+		ret = drm_atomic_helper_wait_for_fences(dev, state, true);
+		if (ret) {
+			drm_atomic_helper_cleanup_planes(dev, state);
+			up(&vc4->async_modeset);
+			return ret;
+		}
+	}
+
+	/*
+	 * This is the point of no return - everything below never fails except
+	 * when the hw goes bonghits. Which means we can commit the new state on
+	 * the software side now.
+	 */
+
+	BUG_ON(drm_atomic_helper_swap_state(state, false) < 0);
+
+	/*
+	 * Everything below can be run asynchronously without the need to grab
+	 * any modeset locks at all under one condition: It must be guaranteed
+	 * that the asynchronous work has either been cancelled (if the driver
+	 * supports it, which at least requires that the framebuffers get
+	 * cleaned up with drm_atomic_helper_cleanup_planes()) or completed
+	 * before the new state gets committed on the software side with
+	 * drm_atomic_helper_swap_state().
+	 *
+	 * This scheme allows new atomic state updates to be prepared and
+	 * checked in parallel to the asynchronous completion of the previous
+	 * update. Which is important since compositors need to figure out the
+	 * composition of the next frame right after having submitted the
+	 * current layout.
+	 */
+
+	drm_atomic_state_get(state);
+	if (nonblock)
+		queue_work(system_unbound_wq, &state->commit_work);
+	else
+		vc4_atomic_complete_commit(state);
 
 	return 0;
 }
@@ -657,7 +697,6 @@ vc4_hvs_channels_duplicate_state(struct drm_private_obj *obj)
 {
 	struct vc4_hvs_state *old_state = to_vc4_hvs_state(obj->state);
 	struct vc4_hvs_state *state;
-	unsigned int i;
 
 	state = kzalloc(sizeof(*state), GFP_KERNEL);
 	if (!state)
@@ -665,16 +704,7 @@ vc4_hvs_channels_duplicate_state(struct drm_private_obj *obj)
 
 	__drm_atomic_helper_private_obj_duplicate_state(obj, &state->base);
 
-
-	for (i = 0; i < HVS_NUM_CHANNELS; i++) {
-		state->fifo_state[i].in_use = old_state->fifo_state[i].in_use;
-
-		if (!old_state->fifo_state[i].pending_commit)
-			continue;
-
-		state->fifo_state[i].pending_commit =
-			drm_crtc_commit_get(old_state->fifo_state[i].pending_commit);
-	}
+	state->unassigned_channels = old_state->unassigned_channels;
 
 	return &state->base;
 }
@@ -683,14 +713,6 @@ static void vc4_hvs_channels_destroy_state(struct drm_private_obj *obj,
 					   struct drm_private_state *state)
 {
 	struct vc4_hvs_state *hvs_state = to_vc4_hvs_state(state);
-	unsigned int i;
-
-	for (i = 0; i < HVS_NUM_CHANNELS; i++) {
-		if (!hvs_state->fifo_state[i].pending_commit)
-			continue;
-
-		drm_crtc_commit_put(hvs_state->fifo_state[i].pending_commit);
-	}
 
 	kfree(hvs_state);
 }
@@ -715,6 +737,7 @@ static int vc4_hvs_channels_obj_init(struct vc4_dev *vc4)
 	if (!state)
 		return -ENOMEM;
 
+	state->unassigned_channels = GENMASK(HVS_NUM_CHANNELS - 1, 0);
 	drm_atomic_private_obj_init(&vc4->base, &vc4->hvs_channels,
 				    &state->base,
 				    &vc4_hvs_state_funcs);
@@ -758,16 +781,11 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 	struct vc4_hvs_state *hvs_new_state;
 	struct drm_crtc_state *old_crtc_state, *new_crtc_state;
 	struct drm_crtc *crtc;
-	unsigned int unassigned_channels = 0;
 	unsigned int i;
 
 	hvs_new_state = vc4_hvs_get_global_state(state);
 	if (!hvs_new_state)
 		return -EINVAL;
-
-	for (i = 0; i < ARRAY_SIZE(hvs_new_state->fifo_state); i++)
-		if (!hvs_new_state->fifo_state[i].in_use)
-			unassigned_channels |= BIT(i);
 
 	for_each_oldnew_crtc_in_state(state, crtc, old_crtc_state, new_crtc_state, i) {
 		struct vc4_crtc_state *old_vc4_crtc_state =
@@ -776,7 +794,6 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 			to_vc4_crtc_state(new_crtc_state);
 		struct vc4_crtc *vc4_crtc = to_vc4_crtc(crtc);
 		unsigned int matching_channels;
-		unsigned int channel;
 
 		/* Nothing to do here, let's skip it */
 		if (old_crtc_state->enable == new_crtc_state->enable)
@@ -787,8 +804,7 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 
 		/* If we're disabling our CRTC, we put back our channel */
 		if (!new_crtc_state->enable) {
-			channel = old_vc4_crtc_state->assigned_channel;
-			hvs_new_state->fifo_state[channel].in_use = false;
+			hvs_new_state->unassigned_channels |= BIT(old_vc4_crtc_state->assigned_channel);
 			new_vc4_crtc_state->assigned_channel = VC4_HVS_CHANNEL_DISABLED;
 			continue;
 		}
@@ -817,14 +833,15 @@ static int vc4_pv_muxing_atomic_check(struct drm_device *dev,
 		 * the future, we will need to have something smarter,
 		 * but it works so far.
 		 */
-		matching_channels = unassigned_channels & vc4_crtc->data->hvs_available_channels;
-		if (!matching_channels)
-			return -EINVAL;
+		matching_channels = hvs_new_state->unassigned_channels & vc4_crtc->data->hvs_available_channels;
+		if (matching_channels) {
+			unsigned int channel = ffs(matching_channels) - 1;
 
-		channel = ffs(matching_channels) - 1;
-		new_vc4_crtc_state->assigned_channel = channel;
-		unassigned_channels &= ~BIT(channel);
-		hvs_new_state->fifo_state[channel].in_use = true;
+			new_vc4_crtc_state->assigned_channel = channel;
+			hvs_new_state->unassigned_channels &= ~BIT(channel);
+		} else {
+			return -EINVAL;
+		}
 	}
 
 	return 0;
@@ -850,14 +867,9 @@ vc4_atomic_check(struct drm_device *dev, struct drm_atomic_state *state)
 	return vc4_load_tracker_atomic_check(state);
 }
 
-static struct drm_mode_config_helper_funcs vc4_mode_config_helpers = {
-	.atomic_commit_setup	= vc4_atomic_commit_setup,
-	.atomic_commit_tail	= vc4_atomic_commit_tail,
-};
-
 static const struct drm_mode_config_funcs vc4_mode_funcs = {
 	.atomic_check = vc4_atomic_check,
-	.atomic_commit = drm_atomic_helper_commit,
+	.atomic_commit = vc4_atomic_commit,
 	.fb_create = vc4_fb_create,
 };
 
@@ -877,9 +889,12 @@ int vc4_kms_load(struct drm_device *dev)
 		vc4->load_tracker_enabled = true;
 	}
 
+	sema_init(&vc4->async_modeset, 1);
+
 	/* Set support for vblank irq fast disable, before drm_vblank_init() */
 	dev->vblank_disable_immediate = true;
 
+	dev->irq_enabled = true;
 	ret = drm_vblank_init(dev, dev->mode_config.num_crtc);
 	if (ret < 0) {
 		dev_err(dev->dev, "failed to initialize vblank\n");
@@ -895,9 +910,9 @@ int vc4_kms_load(struct drm_device *dev)
 	}
 
 	dev->mode_config.funcs = &vc4_mode_funcs;
-	dev->mode_config.helper_private = &vc4_mode_config_helpers;
 	dev->mode_config.preferred_depth = 24;
 	dev->mode_config.async_page_flip = true;
+	dev->mode_config.allow_fb_modifiers = true;
 
 	ret = vc4_ctm_obj_init(vc4);
 	if (ret)

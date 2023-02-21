@@ -15,16 +15,16 @@
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/btree.h"
-#include "xfs_ag.h"
 
 /*
  * Set us up to scrub free space btrees.
  */
 int
 xchk_setup_ag_allocbt(
-	struct xfs_scrub	*sc)
+	struct xfs_scrub	*sc,
+	struct xfs_inode	*ip)
 {
-	return xchk_setup_ag_btree(sc, false);
+	return xchk_setup_ag_btree(sc, ip, false);
 }
 
 /* Free space btree scrubber. */
@@ -91,10 +91,10 @@ xchk_allocbt_xref(
 STATIC int
 xchk_allocbt_rec(
 	struct xchk_btree	*bs,
-	const union xfs_btree_rec *rec)
+	union xfs_btree_rec	*rec)
 {
 	struct xfs_mount	*mp = bs->cur->bc_mp;
-	xfs_agnumber_t		agno = bs->cur->bc_ag.pag->pag_agno;
+	xfs_agnumber_t		agno = bs->cur->bc_ag.agno;
 	xfs_agblock_t		bno;
 	xfs_extlen_t		len;
 

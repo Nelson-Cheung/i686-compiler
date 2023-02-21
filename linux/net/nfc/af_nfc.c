@@ -60,9 +60,6 @@ int nfc_proto_register(const struct nfc_protocol *nfc_proto)
 		proto_tab[nfc_proto->id] = nfc_proto;
 	write_unlock(&proto_tab_lock);
 
-	if (rc)
-		proto_unregister(nfc_proto->proto);
-
 	return rc;
 }
 EXPORT_SYMBOL(nfc_proto_register);
@@ -82,7 +79,7 @@ int __init af_nfc_init(void)
 	return sock_register(&nfc_sock_family_ops);
 }
 
-void __exit af_nfc_exit(void)
+void af_nfc_exit(void)
 {
 	sock_unregister(PF_NFC);
 }

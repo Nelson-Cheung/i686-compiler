@@ -54,7 +54,6 @@ void down(struct semaphore *sem)
 {
 	unsigned long flags;
 
-	might_sleep();
 	raw_spin_lock_irqsave(&sem->lock, flags);
 	if (likely(sem->count > 0))
 		sem->count--;
@@ -78,7 +77,6 @@ int down_interruptible(struct semaphore *sem)
 	unsigned long flags;
 	int result = 0;
 
-	might_sleep();
 	raw_spin_lock_irqsave(&sem->lock, flags);
 	if (likely(sem->count > 0))
 		sem->count--;
@@ -105,7 +103,6 @@ int down_killable(struct semaphore *sem)
 	unsigned long flags;
 	int result = 0;
 
-	might_sleep();
 	raw_spin_lock_irqsave(&sem->lock, flags);
 	if (likely(sem->count > 0))
 		sem->count--;
@@ -122,7 +119,7 @@ EXPORT_SYMBOL(down_killable);
  * @sem: the semaphore to be acquired
  *
  * Try to acquire the semaphore atomically.  Returns 0 if the semaphore has
- * been acquired successfully or 1 if it cannot be acquired.
+ * been acquired successfully or 1 if it it cannot be acquired.
  *
  * NOTE: This return value is inverted from both spin_trylock and
  * mutex_trylock!  Be careful about this when converting code.
@@ -160,7 +157,6 @@ int down_timeout(struct semaphore *sem, long timeout)
 	unsigned long flags;
 	int result = 0;
 
-	might_sleep();
 	raw_spin_lock_irqsave(&sem->lock, flags);
 	if (likely(sem->count > 0))
 		sem->count--;

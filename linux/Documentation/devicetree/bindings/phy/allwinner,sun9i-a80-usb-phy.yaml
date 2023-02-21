@@ -22,8 +22,7 @@ properties:
 
   clocks:
     anyOf:
-      - maxItems: 1
-        description: Main PHY Clock
+      - description: Main PHY Clock
 
       - items:
           - description: Main PHY clock
@@ -40,16 +39,20 @@ properties:
           - const: hsic_480M
 
   resets:
-    minItems: 1
-    items:
+    anyOf:
       - description: Normal USB PHY reset
-      - description: HSIC Reset
+
+      - items:
+          - description: Normal USB PHY reset
+          - description: HSIC Reset
 
   reset-names:
-    minItems: 1
-    items:
+    oneOf:
       - const: phy
-      - const: hsic
+
+      - items:
+          - const: phy
+          - const: hsic
 
   phy_type:
     const: hsic

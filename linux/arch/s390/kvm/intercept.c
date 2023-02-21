@@ -269,7 +269,6 @@ static int handle_prog(struct kvm_vcpu *vcpu)
 
 /**
  * handle_external_interrupt - used for external interruption interceptions
- * @vcpu: virtual cpu
  *
  * This interception only occurs if the CPUSTAT_EXT_INT bit was set, or if
  * the new PSW does not have external interrupts disabled. In the first case,
@@ -316,8 +315,7 @@ static int handle_external_interrupt(struct kvm_vcpu *vcpu)
 }
 
 /**
- * handle_mvpg_pei - Handle MOVE PAGE partial execution interception.
- * @vcpu: virtual cpu
+ * Handle MOVE PAGE partial execution interception.
  *
  * This interception can only happen for guests with DAT disabled and
  * addresses that are currently not mapped in the host. Thus we try to
@@ -400,7 +398,7 @@ int handle_sthyi(struct kvm_vcpu *vcpu)
 	if (!kvm_s390_pv_cpu_is_protected(vcpu) && (addr & ~PAGE_MASK))
 		return kvm_s390_inject_program_int(vcpu, PGM_SPECIFICATION);
 
-	sctns = (void *)get_zeroed_page(GFP_KERNEL_ACCOUNT);
+	sctns = (void *)get_zeroed_page(GFP_KERNEL);
 	if (!sctns)
 		return -ENOMEM;
 

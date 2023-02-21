@@ -252,22 +252,23 @@ static irqreturn_t linflex_rxint(int irq, void *dev_id)
 		flg = TTY_NORMAL;
 		sport->icount.rx++;
 
-		if (status & (LINFLEXD_UARTSR_BOF | LINFLEXD_UARTSR_FEF |
-				LINFLEXD_UARTSR_PE)) {
+		if (status & (LINFLEXD_UARTSR_BOF | LINFLEXD_UARTSR_SZF |
+			      LINFLEXD_UARTSR_FEF | LINFLEXD_UARTSR_PE)) {
+			if (status & LINFLEXD_UARTSR_SZF)
+				status |= LINFLEXD_UARTSR_SZF;
 			if (status & LINFLEXD_UARTSR_BOF)
-				sport->icount.overrun++;
+				status |= LINFLEXD_UARTSR_BOF;
 			if (status & LINFLEXD_UARTSR_FEF) {
-				if (!rx) {
+				if (!rx)
 					brk = true;
-					sport->icount.brk++;
-				} else
-					sport->icount.frame++;
+				status |= LINFLEXD_UARTSR_FEF;
 			}
 			if (status & LINFLEXD_UARTSR_PE)
-				sport->icount.parity++;
+				status |=  LINFLEXD_UARTSR_PE;
 		}
 
-		writel(status, sport->membase + UARTSR);
+		writel(status | LINFLEXD_UARTSR_RMB | LINFLEXD_UARTSR_DRFRFE,
+		       sport->membase + UARTSR);
 		status = readl(sport->membase + UARTSR);
 
 		if (brk) {
@@ -861,7 +862,11 @@ static int linflex_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, sport);
 
-	return uart_add_one_port(&linflex_reg, sport);
+	ret = uart_add_one_port(&linflex_reg, sport);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int linflex_remove(struct platform_device *pdev)

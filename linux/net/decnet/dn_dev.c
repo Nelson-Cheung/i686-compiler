@@ -521,7 +521,8 @@ int dn_dev_set_default(struct net_device *dev, int force)
 	}
 	spin_unlock(&dndev_lock);
 
-	dev_put(old);
+	if (old)
+		dev_put(old);
 	return rv;
 }
 
@@ -535,7 +536,8 @@ static void dn_dev_check_default(struct net_device *dev)
 	}
 	spin_unlock(&dndev_lock);
 
-	dev_put(dev);
+	if (dev)
+		dev_put(dev);
 }
 
 /*
@@ -656,7 +658,7 @@ static int dn_nl_newaddr(struct sk_buff *skb, struct nlmsghdr *nlh,
 	ifa->ifa_dev = dn_db;
 
 	if (tb[IFA_LABEL])
-		nla_strscpy(ifa->ifa_label, tb[IFA_LABEL], IFNAMSIZ);
+		nla_strlcpy(ifa->ifa_label, tb[IFA_LABEL], IFNAMSIZ);
 	else
 		memcpy(ifa->ifa_label, dev->name, IFNAMSIZ);
 

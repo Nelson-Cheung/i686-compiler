@@ -21,50 +21,6 @@
 #include "rpmsg_internal.h"
 
 /**
- * rpmsg_create_channel() - create a new rpmsg channel
- * using its name and address info.
- * @rpdev: rpmsg device
- * @chinfo: channel_info to bind
- *
- * Returns a pointer to the new rpmsg device on success, or NULL on error.
- */
-struct rpmsg_device *rpmsg_create_channel(struct rpmsg_device *rpdev,
-					  struct rpmsg_channel_info *chinfo)
-{
-	if (WARN_ON(!rpdev))
-		return NULL;
-	if (!rpdev->ops || !rpdev->ops->create_channel) {
-		dev_err(&rpdev->dev, "no create_channel ops found\n");
-		return NULL;
-	}
-
-	return rpdev->ops->create_channel(rpdev, chinfo);
-}
-EXPORT_SYMBOL(rpmsg_create_channel);
-
-/**
- * rpmsg_release_channel() - release a rpmsg channel
- * using its name and address info.
- * @rpdev: rpmsg device
- * @chinfo: channel_info to bind
- *
- * Returns 0 on success or an appropriate error value.
- */
-int rpmsg_release_channel(struct rpmsg_device *rpdev,
-			  struct rpmsg_channel_info *chinfo)
-{
-	if (WARN_ON(!rpdev))
-		return -EINVAL;
-	if (!rpdev->ops || !rpdev->ops->release_channel) {
-		dev_err(&rpdev->dev, "no release_channel ops found\n");
-		return -ENXIO;
-	}
-
-	return rpdev->ops->release_channel(rpdev, chinfo);
-}
-EXPORT_SYMBOL(rpmsg_release_channel);
-
-/**
  * rpmsg_create_ept() - create a new rpmsg_endpoint
  * @rpdev: rpmsg channel device
  * @cb: rx callback handler
@@ -459,10 +415,8 @@ static int rpmsg_dev_match(struct device *dev, struct device_driver *drv)
 
 	if (ids)
 		for (i = 0; ids[i].name[0]; i++)
-			if (rpmsg_id_match(rpdev, &ids[i])) {
-				rpdev->id.driver_data = ids[i].driver_data;
+			if (rpmsg_id_match(rpdev, &ids[i]))
 				return 1;
-			}
 
 	return of_driver_match_device(dev, drv);
 }
@@ -530,13 +484,14 @@ out:
 	return err;
 }
 
-static void rpmsg_dev_remove(struct device *dev)
+static int rpmsg_dev_remove(struct device *dev)
 {
 	struct rpmsg_device *rpdev = to_rpmsg_device(dev);
 	struct rpmsg_driver *rpdrv = to_rpmsg_driver(rpdev->dev.driver);
+	int err = 0;
 
 	if (rpdev->ops->announce_destroy)
-		rpdev->ops->announce_destroy(rpdev);
+		err = rpdev->ops->announce_destroy(rpdev);
 
 	if (rpdrv->remove)
 		rpdrv->remove(rpdev);
@@ -545,6 +500,8 @@ static void rpmsg_dev_remove(struct device *dev)
 
 	if (rpdev->ept)
 		rpmsg_destroy_ept(rpdev->ept);
+
+	return err;
 }
 
 static struct bus_type rpmsg_bus = {

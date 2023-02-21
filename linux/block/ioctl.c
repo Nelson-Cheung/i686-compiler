@@ -16,7 +16,6 @@
 static int blkpg_do_ioctl(struct block_device *bdev,
 			  struct blkpg_partition __user *upart, int op)
 {
-	struct gendisk *disk = bdev->bd_disk;
 	struct blkpg_partition p;
 	long long start, length;
 
@@ -31,19 +30,28 @@ static int blkpg_do_ioctl(struct block_device *bdev,
 		return -EINVAL;
 
 	if (op == BLKPG_DEL_PARTITION)
-		return bdev_del_partition(disk, p.pno);
+		return bdev_del_partition(bdev, p.pno);
 
 	start = p.start >> SECTOR_SHIFT;
 	length = p.length >> SECTOR_SHIFT;
+
+	/* check for fit in a hd_struct */
+	if (sizeof(sector_t) < sizeof(long long)) {
+		long pstart = start, plength = length;
+
+		if (pstart != start || plength != length || pstart < 0 ||
+		    plength < 0 || p.pno > 65535)
+			return -EINVAL;
+	}
 
 	switch (op) {
 	case BLKPG_ADD_PARTITION:
 		/* check if partition is aligned to blocksize */
 		if (p.start & (bdev_logical_block_size(bdev) - 1))
 			return -EINVAL;
-		return bdev_add_partition(disk, p.pno, start, length);
+		return bdev_add_partition(bdev, p.pno, start, length);
 	case BLKPG_RESIZE_PARTITION:
-		return bdev_resize_partition(disk, p.pno, start, length);
+		return bdev_resize_partition(bdev, p.pno, start, length);
 	default:
 		return -EINVAL;
 	}
@@ -82,29 +90,20 @@ static int compat_blkpg_ioctl(struct block_device *bdev,
 }
 #endif
 
-static int blkdev_reread_part(struct block_device *bdev, fmode_t mode)
+static int blkdev_reread_part(struct block_device *bdev)
 {
-	struct block_device *tmp;
+	int ret;
 
 	if (!disk_part_scan_enabled(bdev->bd_disk) || bdev_is_partition(bdev))
 		return -EINVAL;
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-	if (bdev->bd_disk->open_partitions)
-		return -EBUSY;
 
-	/*
-	 * Reopen the device to revalidate the driver state and force a
-	 * partition rescan.
-	 */
-	mode &= ~FMODE_EXCL;
-	set_bit(GD_NEED_PART_SCAN, &bdev->bd_disk->state);
+	mutex_lock(&bdev->bd_mutex);
+	ret = bdev_disk_changed(bdev, false);
+	mutex_unlock(&bdev->bd_mutex);
 
-	tmp = blkdev_get_by_dev(bdev->bd_dev, mode, NULL);
-	if (IS_ERR(tmp))
-		return PTR_ERR(tmp);
-	blkdev_put(tmp, mode);
-	return 0;
+	return ret;
 }
 
 static int blk_ioctl_discard(struct block_device *bdev, fmode_t mode,
@@ -220,6 +219,23 @@ static int compat_put_ulong(compat_ulong_t __user *argp, compat_ulong_t val)
 }
 #endif
 
+int __blkdev_driver_ioctl(struct block_device *bdev, fmode_t mode,
+			unsigned cmd, unsigned long arg)
+{
+	struct gendisk *disk = bdev->bd_disk;
+
+	if (disk->fops->ioctl)
+		return disk->fops->ioctl(bdev, mode, cmd, arg);
+
+	return -ENOTTY;
+}
+/*
+ * For the record: _GPL here is only because somebody decided to slap it
+ * on the previous export.  Sheer idiocy, since it wasn't copyrightable
+ * at all and could be open-coded without any exports by anybody who cares.
+ */
+EXPORT_SYMBOL_GPL(__blkdev_driver_ioctl);
+
 #ifdef CONFIG_COMPAT
 /*
  * This is the equivalent of compat_ptr_ioctl(), to be used by block
@@ -330,11 +346,38 @@ static int blkdev_pr_clear(struct block_device *bdev,
 	return ops->pr_clear(bdev, c.key);
 }
 
+/*
+ * Is it an unrecognized ioctl? The correct returns are either
+ * ENOTTY (final) or ENOIOCTLCMD ("I don't know this one, try a
+ * fallback"). ENOIOCTLCMD gets turned into ENOTTY by the ioctl
+ * code before returning.
+ *
+ * Confused drivers sometimes return EINVAL, which is wrong. It
+ * means "I understood the ioctl command, but the parameters to
+ * it were wrong".
+ *
+ * We should aim to just fix the broken drivers, the EINVAL case
+ * should go away.
+ */
+static inline int is_unrecognized_ioctl(int ret)
+{
+	return	ret == -EINVAL ||
+		ret == -ENOTTY ||
+		ret == -ENOIOCTLCMD;
+}
+
 static int blkdev_flushbuf(struct block_device *bdev, fmode_t mode,
 		unsigned cmd, unsigned long arg)
 {
+	int ret;
+
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
+
+	ret = __blkdev_driver_ioctl(bdev, mode, cmd, arg);
+	if (!is_unrecognized_ioctl(ret))
+		return ret;
+
 	fsync_bdev(bdev);
 	invalidate_bdev(bdev);
 	return 0;
@@ -348,14 +391,12 @@ static int blkdev_roset(struct block_device *bdev, fmode_t mode,
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
+	ret = __blkdev_driver_ioctl(bdev, mode, cmd, arg);
+	if (!is_unrecognized_ioctl(ret))
+		return ret;
 	if (get_user(n, (int __user *)arg))
 		return -EFAULT;
-	if (bdev->bd_disk->fops->set_read_only) {
-		ret = bdev->bd_disk->fops->set_read_only(bdev, n);
-		if (ret)
-			return ret;
-	}
-	bdev->bd_read_only = n;
+	set_device_ro(bdev, n);
 	return 0;
 }
 
@@ -470,8 +511,6 @@ static int blkdev_common_ioctl(struct block_device *bdev, fmode_t mode,
 				BLKDEV_DISCARD_SECURE);
 	case BLKZEROOUT:
 		return blk_ioctl_zeroout(bdev, mode, arg);
-	case BLKGETDISKSEQ:
-		return put_u64(argp, bdev->bd_disk->diskseq);
 	case BLKREPORTZONE:
 		return blkdev_report_zones_ioctl(bdev, mode, cmd, arg);
 	case BLKRESETZONE:
@@ -507,10 +546,10 @@ static int blkdev_common_ioctl(struct block_device *bdev, fmode_t mode,
 	case BLKFRASET:
 		if(!capable(CAP_SYS_ADMIN))
 			return -EACCES;
-		bdev->bd_disk->bdi->ra_pages = (arg * 512) / PAGE_SIZE;
+		bdev->bd_bdi->ra_pages = (arg * 512) / PAGE_SIZE;
 		return 0;
 	case BLKRRPART:
-		return blkdev_reread_part(bdev, mode);
+		return blkdev_reread_part(bdev);
 	case BLKTRACESTART:
 	case BLKTRACESTOP:
 	case BLKTRACETEARDOWN:
@@ -557,8 +596,7 @@ int blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd,
 	case BLKFRAGET:
 		if (!argp)
 			return -EINVAL;
-		return put_long(argp,
-			(bdev->bd_disk->bdi->ra_pages * PAGE_SIZE) / 512);
+		return put_long(argp, (bdev->bd_bdi->ra_pages*PAGE_SIZE) / 512);
 	case BLKGETSIZE:
 		size = i_size_read(bdev->bd_inode);
 		if ((size >> 9) > ~0UL)
@@ -581,12 +619,10 @@ int blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd,
 	}
 
 	ret = blkdev_common_ioctl(bdev, mode, cmd, arg, argp);
-	if (ret != -ENOIOCTLCMD)
-		return ret;
+	if (ret == -ENOIOCTLCMD)
+		return __blkdev_driver_ioctl(bdev, mode, cmd, arg);
 
-	if (!bdev->bd_disk->fops->ioctl)
-		return -ENOTTY;
-	return bdev->bd_disk->fops->ioctl(bdev, mode, cmd, arg);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(blkdev_ioctl); /* for /dev/raw */
 
@@ -603,7 +639,8 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 {
 	int ret;
 	void __user *argp = compat_ptr(arg);
-	struct block_device *bdev = I_BDEV(file->f_mapping->host);
+	struct inode *inode = file->f_mapping->host;
+	struct block_device *bdev = inode->i_bdev;
 	struct gendisk *disk = bdev->bd_disk;
 	fmode_t mode = file->f_mode;
 	loff_t size;
@@ -630,7 +667,7 @@ long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (!argp)
 			return -EINVAL;
 		return compat_put_long(argp,
-			(bdev->bd_disk->bdi->ra_pages * PAGE_SIZE) / 512);
+			       (bdev->bd_bdi->ra_pages * PAGE_SIZE) / 512);
 	case BLKGETSIZE:
 		size = i_size_read(bdev->bd_inode);
 		if ((size >> 9) > ~0UL)

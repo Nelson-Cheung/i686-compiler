@@ -33,6 +33,7 @@
 #include <net/mptcp.h>
 #include "protocol.h"
 
+#define TOKEN_MAX_RETRIES	4
 #define TOKEN_MAX_CHAIN_LEN	4
 
 struct token_bucket {
@@ -152,8 +153,11 @@ int mptcp_token_new_connect(struct sock *sk)
 {
 	struct mptcp_subflow_context *subflow = mptcp_subflow_ctx(sk);
 	struct mptcp_sock *msk = mptcp_sk(subflow->conn);
-	int retries = MPTCP_TOKEN_MAX_RETRIES;
+	int retries = TOKEN_MAX_RETRIES;
 	struct token_bucket *bucket;
+
+	pr_debug("ssk=%p, local_key=%llu, token=%u, idsn=%llu\n",
+		 sk, subflow->local_key, subflow->token, subflow->idsn);
 
 again:
 	mptcp_crypto_key_gen_sha(&subflow->local_key, &subflow->token,
@@ -167,9 +171,6 @@ again:
 			return -EBUSY;
 		goto again;
 	}
-
-	pr_debug("ssk=%p, local_key=%llu, token=%u, idsn=%llu\n",
-		 sk, subflow->local_key, subflow->token, subflow->idsn);
 
 	WRITE_ONCE(msk->token, subflow->token);
 	__sk_nulls_add_node_rcu((struct sock *)msk, &bucket->msk_chain);
@@ -231,7 +232,6 @@ found:
 
 /**
  * mptcp_token_get_sock - retrieve mptcp connection sock using its token
- * @net: restrict to this namespace
  * @token: token of the mptcp connection to retrieve
  *
  * This function returns the mptcp connection structure with the given token.
@@ -239,7 +239,7 @@ found:
  *
  * returns NULL if no connection with the given token value exists.
  */
-struct mptcp_sock *mptcp_token_get_sock(struct net *net, u32 token)
+struct mptcp_sock *mptcp_token_get_sock(u32 token)
 {
 	struct hlist_nulls_node *pos;
 	struct token_bucket *bucket;
@@ -252,15 +252,11 @@ struct mptcp_sock *mptcp_token_get_sock(struct net *net, u32 token)
 again:
 	sk_nulls_for_each_rcu(sk, pos, &bucket->msk_chain) {
 		msk = mptcp_sk(sk);
-		if (READ_ONCE(msk->token) != token ||
-		    !net_eq(sock_net(sk), net))
+		if (READ_ONCE(msk->token) != token)
 			continue;
-
 		if (!refcount_inc_not_zero(&sk->sk_refcnt))
 			goto not_found;
-
-		if (READ_ONCE(msk->token) != token ||
-		    !net_eq(sock_net(sk), net)) {
+		if (READ_ONCE(msk->token) != token) {
 			sock_put(sk);
 			goto again;
 		}
@@ -406,7 +402,7 @@ void __init mptcp_token_init(void)
 	}
 }
 
-#if IS_MODULE(CONFIG_MPTCP_KUNIT_TEST)
+#if IS_MODULE(CONFIG_MPTCP_KUNIT_TESTS)
 EXPORT_SYMBOL_GPL(mptcp_token_new_request);
 EXPORT_SYMBOL_GPL(mptcp_token_new_connect);
 EXPORT_SYMBOL_GPL(mptcp_token_accept);

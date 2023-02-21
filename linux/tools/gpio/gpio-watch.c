@@ -10,7 +10,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <inttypes.h>
 #include <linux/gpio.h>
 #include <poll.h>
 #include <stdbool.h>
@@ -87,8 +86,8 @@ int main(int argc, char **argv)
 				return EXIT_FAILURE;
 			}
 
-			printf("line %u: %s at %" PRIu64 "\n",
-			       chg.info.offset, event, (uint64_t)chg.timestamp_ns);
+			printf("line %u: %s at %llu\n",
+			       chg.info.offset, event, chg.timestamp_ns);
 		}
 	}
 

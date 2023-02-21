@@ -10,11 +10,11 @@
 #include <linux/amba/bus.h>
 #include <linux/delay.h>
 #include <linux/dma-iommu.h>
-#include <linux/dma-map-ops.h>
 #include <linux/freezer.h>
 #include <linux/interval_tree.h>
 #include <linux/iommu.h>
 #include <linux/module.h>
+#include <linux/of_iommu.h>
 #include <linux/of_platform.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
@@ -598,6 +598,12 @@ static struct iommu_domain *viommu_domain_alloc(unsigned type)
 	spin_lock_init(&vdomain->mappings_lock);
 	vdomain->mappings = RB_ROOT_CACHED;
 
+	if (type == IOMMU_DOMAIN_DMA &&
+	    iommu_get_dma_cookie(&vdomain->domain)) {
+		kfree(vdomain);
+		return NULL;
+	}
+
 	return &vdomain->domain;
 }
 
@@ -636,6 +642,8 @@ static int viommu_domain_finalise(struct viommu_endpoint *vdev,
 static void viommu_domain_free(struct iommu_domain *domain)
 {
 	struct viommu_domain *vdomain = to_viommu_domain(domain);
+
+	iommu_put_dma_cookie(domain);
 
 	/* Free all remaining mappings (size 2^64) */
 	viommu_del_mappings(vdomain, 0, 0);
@@ -896,15 +904,6 @@ err_free_dev:
 	return ERR_PTR(ret);
 }
 
-static void viommu_probe_finalize(struct device *dev)
-{
-#ifndef CONFIG_ARCH_HAS_SETUP_DMA_OPS
-	/* First clear the DMA ops in case we're switching from a DMA domain */
-	set_dma_ops(dev, NULL);
-	iommu_setup_dma_ops(dev, 0, U64_MAX);
-#endif
-}
-
 static void viommu_release_device(struct device *dev)
 {
 	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
@@ -941,13 +940,11 @@ static struct iommu_ops viommu_ops = {
 	.iova_to_phys		= viommu_iova_to_phys,
 	.iotlb_sync		= viommu_iotlb_sync,
 	.probe_device		= viommu_probe_device,
-	.probe_finalize		= viommu_probe_finalize,
 	.release_device		= viommu_release_device,
 	.device_group		= viommu_device_group,
 	.get_resv_regions	= viommu_get_resv_regions,
 	.put_resv_regions	= generic_iommu_put_resv_regions,
 	.of_xlate		= viommu_of_xlate,
-	.owner			= THIS_MODULE,
 };
 
 static int viommu_init_vqs(struct viommu_dev *viommu)
@@ -1068,7 +1065,10 @@ static int viommu_probe(struct virtio_device *vdev)
 	if (ret)
 		goto err_free_vqs;
 
-	iommu_device_register(&viommu->iommu, &viommu_ops, parent_dev);
+	iommu_device_set_ops(&viommu->iommu, &viommu_ops);
+	iommu_device_set_fwnode(&viommu->iommu, parent_dev->fwnode);
+
+	iommu_device_register(&viommu->iommu);
 
 #ifdef CONFIG_PCI
 	if (pci_bus_type.iommu_ops != &viommu_ops) {
@@ -1138,7 +1138,6 @@ static struct virtio_device_id id_table[] = {
 	{ VIRTIO_ID_IOMMU, VIRTIO_DEV_ANY_ID },
 	{ 0 },
 };
-MODULE_DEVICE_TABLE(virtio, id_table);
 
 static struct virtio_driver virtio_iommu_drv = {
 	.driver.name		= KBUILD_MODNAME,

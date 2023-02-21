@@ -44,13 +44,16 @@ static int coreboot_bus_probe(struct device *dev)
 	return ret;
 }
 
-static void coreboot_bus_remove(struct device *dev)
+static int coreboot_bus_remove(struct device *dev)
 {
+	int ret = 0;
 	struct coreboot_device *device = CB_DEV(dev);
 	struct coreboot_driver *driver = CB_DRV(dev->driver);
 
 	if (driver->remove)
-		driver->remove(device);
+		ret = driver->remove(device);
+
+	return ret;
 }
 
 static struct bus_type coreboot_bus_type = {

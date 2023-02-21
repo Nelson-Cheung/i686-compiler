@@ -176,11 +176,10 @@ static int ar934x_spi_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ctlr = devm_spi_alloc_master(&pdev->dev, sizeof(*sp));
+	ctlr = spi_alloc_master(&pdev->dev, sizeof(*sp));
 	if (!ctlr) {
 		dev_info(&pdev->dev, "failed to allocate spi controller\n");
-		ret = -ENOMEM;
-		goto err_clk_disable;
+		return -ENOMEM;
 	}
 
 	/* disable flash mapping and expose spi controller registers */
@@ -203,13 +202,7 @@ static int ar934x_spi_probe(struct platform_device *pdev)
 	sp->clk_freq = clk_get_rate(clk);
 	sp->ctlr = ctlr;
 
-	ret = spi_register_controller(ctlr);
-	if (!ret)
-		return 0;
-
-err_clk_disable:
-	clk_disable_unprepare(clk);
-	return ret;
+	return devm_spi_register_controller(&pdev->dev, ctlr);
 }
 
 static int ar934x_spi_remove(struct platform_device *pdev)
@@ -220,7 +213,6 @@ static int ar934x_spi_remove(struct platform_device *pdev)
 	ctlr = dev_get_drvdata(&pdev->dev);
 	sp = spi_controller_get_devdata(ctlr);
 
-	spi_unregister_controller(ctlr);
 	clk_disable_unprepare(sp->clk);
 
 	return 0;

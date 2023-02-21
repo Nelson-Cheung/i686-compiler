@@ -11,13 +11,12 @@
 #include <asm/irq.h>
 #include <asm/sections.h>
 #include <asm/mem_detect.h>
-#include <asm/facility.h>
 #include "sclp.h"
 #include "sclp_rw.h"
 
 static struct read_info_sccb __bootdata(sclp_info_sccb);
 static int __bootdata(sclp_info_sccb_valid);
-char *__bootdata(sclp_early_sccb);
+char *sclp_early_sccb = (char *) EARLY_SCCB_OFFSET;
 int sclp_init_state = sclp_init_state_uninitialized;
 /*
  * Used to keep track of the size of the event masks. Qemu until version 2.11
@@ -66,13 +65,13 @@ int sclp_early_cmd(sclp_cmdw_t cmd, void *sccb)
 	unsigned long flags;
 	int rc;
 
-	flags = arch_local_irq_save();
+	raw_local_irq_save(flags);
 	rc = sclp_service_call(cmd, sccb);
 	if (rc)
 		goto out;
 	sclp_early_wait_irq();
 out:
-	arch_local_irq_restore(flags);
+	raw_local_irq_restore(flags);
 	return rc;
 }
 
@@ -211,11 +210,6 @@ static int sclp_early_setup(int disable, int *have_linemode, int *have_vt220)
 	return rc;
 }
 
-void sclp_early_set_buffer(void *sccb)
-{
-	sclp_early_sccb = sccb;
-}
-
 /*
  * Output one or more lines of text on the SCLP console (VT220 and /
  * or line-mode).
@@ -240,32 +234,21 @@ void sclp_early_printk(const char *str)
 	__sclp_early_printk(str, strlen(str));
 }
 
-/*
- * We can't pass sclp_info_sccb to sclp_early_cmd() here directly,
- * because it might not fulfil the requiremets for a SCLP communication buffer:
- *   - lie below 2G in memory
- *   - be page-aligned
- * Therefore, we use the buffer sclp_early_sccb (which fulfils all those
- * requirements) temporarily for communication and copy a received response
- * back into the buffer sclp_info_sccb upon successful completion.
- */
 int __init sclp_early_read_info(void)
 {
 	int i;
-	int length = test_facility(140) ? EXT_SCCB_READ_SCP : PAGE_SIZE;
-	struct read_info_sccb *sccb = (struct read_info_sccb *)sclp_early_sccb;
+	struct read_info_sccb *sccb = &sclp_info_sccb;
 	sclp_cmdw_t commands[] = {SCLP_CMDW_READ_SCP_INFO_FORCED,
 				  SCLP_CMDW_READ_SCP_INFO};
 
 	for (i = 0; i < ARRAY_SIZE(commands); i++) {
-		memset(sccb, 0, length);
-		sccb->header.length = length;
+		memset(sccb, 0, sizeof(*sccb));
+		sccb->header.length = sizeof(*sccb);
 		sccb->header.function_code = 0x80;
 		sccb->header.control_mask[2] = 0x80;
 		if (sclp_early_cmd(commands[i], sccb))
 			break;
 		if (sccb->header.response_code == 0x10) {
-			memcpy(&sclp_info_sccb, sccb, length);
 			sclp_info_sccb_valid = 1;
 			return 0;
 		}
@@ -275,12 +258,13 @@ int __init sclp_early_read_info(void)
 	return -EIO;
 }
 
-struct read_info_sccb * __init sclp_early_get_info(void)
+int __init sclp_early_get_info(struct read_info_sccb *info)
 {
 	if (!sclp_info_sccb_valid)
-		return NULL;
+		return -EIO;
 
-	return &sclp_info_sccb;
+	*info = sclp_info_sccb;
+	return 0;
 }
 
 int __init sclp_early_get_memsize(unsigned long *mem)

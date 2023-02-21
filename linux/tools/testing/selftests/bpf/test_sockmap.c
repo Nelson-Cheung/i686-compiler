@@ -732,7 +732,7 @@ static int sendmsg_test(struct sockmap_options *opt)
 		 * socket is not a valid test. So in this case lets not
 		 * enable kTLS but still run the test.
 		 */
-		if (!txmsg_redir || txmsg_ingress) {
+		if (!txmsg_redir || (txmsg_redir && txmsg_ingress)) {
 			err = sockmap_init_ktls(opt->verbose, rx_fd);
 			if (err)
 				return err;
@@ -1273,16 +1273,6 @@ static char *test_to_str(int test)
 	return "unknown";
 }
 
-static void append_str(char *dst, const char *src, size_t dst_cap)
-{
-	size_t avail = dst_cap - strlen(dst);
-
-	if (avail <= 1) /* just zero byte could be written */
-		return;
-
-	strncat(dst, src, avail - 1); /* strncat() adds + 1 for zero byte */
-}
-
 #define OPTSTRING 60
 static void test_options(char *options)
 {
@@ -1291,42 +1281,42 @@ static void test_options(char *options)
 	memset(options, 0, OPTSTRING);
 
 	if (txmsg_pass)
-		append_str(options, "pass,", OPTSTRING);
+		strncat(options, "pass,", OPTSTRING);
 	if (txmsg_redir)
-		append_str(options, "redir,", OPTSTRING);
+		strncat(options, "redir,", OPTSTRING);
 	if (txmsg_drop)
-		append_str(options, "drop,", OPTSTRING);
+		strncat(options, "drop,", OPTSTRING);
 	if (txmsg_apply) {
 		snprintf(tstr, OPTSTRING, "apply %d,", txmsg_apply);
-		append_str(options, tstr, OPTSTRING);
+		strncat(options, tstr, OPTSTRING);
 	}
 	if (txmsg_cork) {
 		snprintf(tstr, OPTSTRING, "cork %d,", txmsg_cork);
-		append_str(options, tstr, OPTSTRING);
+		strncat(options, tstr, OPTSTRING);
 	}
 	if (txmsg_start) {
 		snprintf(tstr, OPTSTRING, "start %d,", txmsg_start);
-		append_str(options, tstr, OPTSTRING);
+		strncat(options, tstr, OPTSTRING);
 	}
 	if (txmsg_end) {
 		snprintf(tstr, OPTSTRING, "end %d,", txmsg_end);
-		append_str(options, tstr, OPTSTRING);
+		strncat(options, tstr, OPTSTRING);
 	}
 	if (txmsg_start_pop) {
 		snprintf(tstr, OPTSTRING, "pop (%d,%d),",
 			 txmsg_start_pop, txmsg_start_pop + txmsg_pop);
-		append_str(options, tstr, OPTSTRING);
+		strncat(options, tstr, OPTSTRING);
 	}
 	if (txmsg_ingress)
-		append_str(options, "ingress,", OPTSTRING);
+		strncat(options, "ingress,", OPTSTRING);
 	if (txmsg_redir_skb)
-		append_str(options, "redir_skb,", OPTSTRING);
+		strncat(options, "redir_skb,", OPTSTRING);
 	if (txmsg_ktls_skb)
-		append_str(options, "ktls_skb,", OPTSTRING);
+		strncat(options, "ktls_skb,", OPTSTRING);
 	if (ktls)
-		append_str(options, "ktls,", OPTSTRING);
+		strncat(options, "ktls,", OPTSTRING);
 	if (peek_flag)
-		append_str(options, "peek,", OPTSTRING);
+		strncat(options, "peek,", OPTSTRING);
 }
 
 static int __test_exec(int cgrp, int test, struct sockmap_options *opt)

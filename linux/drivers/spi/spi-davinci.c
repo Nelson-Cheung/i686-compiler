@@ -213,6 +213,12 @@ static void davinci_spi_chipselect(struct spi_device *spi, int value)
 	 * line for the controller
 	 */
 	if (spi->cs_gpiod) {
+		/*
+		 * FIXME: is this code ever executed? This host does not
+		 * set SPI_MASTER_GPIO_SS so this chipselect callback should
+		 * not get called from the SPI core when we are using
+		 * GPIOs for chip select.
+		 */
 		if (value == BITBANG_CS_ACTIVE)
 			gpiod_set_value(spi->cs_gpiod, 1);
 		else
@@ -811,13 +817,18 @@ static int spi_davinci_get_pdata(struct platform_device *pdev,
 			struct davinci_spi *dspi)
 {
 	struct device_node *node = pdev->dev.of_node;
-	const struct davinci_spi_of_data *spi_data;
+	struct davinci_spi_of_data *spi_data;
 	struct davinci_spi_platform_data *pdata;
 	unsigned int num_cs, intr_line = 0;
+	const struct of_device_id *match;
 
 	pdata = &dspi->pdata;
 
-	spi_data = device_get_match_data(&pdev->dev);
+	match = of_match_device(davinci_spi_of_match, &pdev->dev);
+	if (!match)
+		return -ENODEV;
+
+	spi_data = (struct davinci_spi_of_data *)match->data;
 
 	pdata->version = spi_data->version;
 	pdata->prescaler_limit = spi_data->prescaler_limit;
@@ -939,7 +950,7 @@ static int davinci_spi_probe(struct platform_device *pdev)
 	master->bus_num = pdev->id;
 	master->num_chipselect = pdata->num_chipselect;
 	master->bits_per_word_mask = SPI_BPW_RANGE_MASK(2, 16);
-	master->flags = SPI_MASTER_MUST_RX | SPI_MASTER_GPIO_SS;
+	master->flags = SPI_MASTER_MUST_RX;
 	master->setup = davinci_spi_setup;
 	master->cleanup = davinci_spi_cleanup;
 	master->can_dma = davinci_spi_can_dma;
@@ -1029,13 +1040,13 @@ static int davinci_spi_remove(struct platform_device *pdev)
 	spi_bitbang_stop(&dspi->bitbang);
 
 	clk_disable_unprepare(dspi->clk);
+	spi_master_put(master);
 
 	if (dspi->dma_rx) {
 		dma_release_channel(dspi->dma_rx);
 		dma_release_channel(dspi->dma_tx);
 	}
 
-	spi_master_put(master);
 	return 0;
 }
 

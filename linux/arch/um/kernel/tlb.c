@@ -162,6 +162,9 @@ static int add_munmap(unsigned long addr, unsigned long len,
 	struct host_vm_op *last;
 	int ret = 0;
 
+	if ((addr >= STUB_START) && (addr < STUB_END))
+		return -EINVAL;
+
 	if (hvc->index != 0) {
 		last = &hvc->ops[hvc->index - 1];
 		if ((last->type == MUNMAP) &&
@@ -223,6 +226,9 @@ static inline int update_pte_range(pmd_t *pmd, unsigned long addr,
 
 	pte = pte_offset_kernel(pmd, addr);
 	do {
+		if ((addr >= STUB_START) && (addr < STUB_END))
+			continue;
+
 		r = pte_read(*pte);
 		w = pte_write(*pte);
 		x = pte_exec(*pte);
@@ -340,11 +346,12 @@ void fix_range_common(struct mm_struct *mm, unsigned long start_addr,
 
 	/* This is not an else because ret is modified above */
 	if (ret) {
-		struct mm_id *mm_idp = &current->mm->context.id;
-
 		printk(KERN_ERR "fix_range_common: failed, killing current "
 		       "process: %d\n", task_tgid_vnr(current));
-		mm_idp->kill = 1;
+		/* We are under mmap_lock, release it such that current can terminate */
+		mmap_write_unlock(current->mm);
+		force_sig(SIGKILL);
+		do_signal(&current->thread.regs);
 	}
 }
 
@@ -465,7 +472,6 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long address)
 	struct mm_id *mm_id;
 
 	address &= PAGE_MASK;
-
 	pgd = pgd_offset(mm, address);
 	if (!pgd_present(*pgd))
 		goto kill;

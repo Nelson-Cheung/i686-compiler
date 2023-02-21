@@ -25,14 +25,10 @@ static void printcpulist(int str_len, char *str, int mask_size,
 			index = snprintf(&str[curr_index],
 					 str_len - curr_index, ",");
 			curr_index += index;
-			if (curr_index >= str_len)
-				break;
 		}
 		index = snprintf(&str[curr_index], str_len - curr_index, "%d",
 				 i);
 		curr_index += index;
-		if (curr_index >= str_len)
-			break;
 		first = 0;
 	}
 }
@@ -68,14 +64,10 @@ static void printcpumask(int str_len, char *str, int mask_size,
 		index = snprintf(&str[curr_index], str_len - curr_index, "%08x",
 				 mask[i]);
 		curr_index += index;
-		if (curr_index >= str_len)
-			break;
 		if (i) {
 			strncat(&str[curr_index], ",", str_len - curr_index);
 			curr_index++;
 		}
-		if (curr_index >= str_len)
-			break;
 	}
 
 	free(mask);
@@ -193,7 +185,7 @@ static void _isst_pbf_display_information(int cpu, FILE *outf, int level,
 					  int disp_level)
 {
 	char header[256];
-	char value[512];
+	char value[256];
 
 	snprintf(header, sizeof(header), "speed-select-base-freq-properties");
 	format_and_print(outf, disp_level, header, NULL);
@@ -357,7 +349,7 @@ void isst_ctdp_display_information(int cpu, FILE *outf, int tdp_level,
 				   struct isst_pkg_ctdp *pkg_dev)
 {
 	char header[256];
-	char value[512];
+	char value[256];
 	static int level;
 	int i;
 
@@ -446,7 +438,7 @@ void isst_ctdp_display_information(int cpu, FILE *outf, int tdp_level,
 		if (ctdp_level->mem_freq) {
 			snprintf(header, sizeof(header), "mem-frequency(MHz)");
 			snprintf(value, sizeof(value), "%d",
-				 ctdp_level->mem_freq);
+				 ctdp_level->mem_freq * DISP_FREQ_MULTIPLIER);
 			format_and_print(outf, level + 2, header, value);
 		}
 
@@ -770,22 +762,4 @@ void isst_display_error_info_message(int error, char *msg, int arg_valid, int ar
 	format_and_print(outf, 1, NULL, NULL);
 	if (!start)
 		format_and_print(outf, 0, NULL, NULL);
-}
-
-void isst_trl_display_information(int cpu, FILE *outf, unsigned long long trl)
-{
-	char header[256];
-	char value[256];
-	int level;
-
-	level = print_package_info(cpu, outf);
-
-	snprintf(header, sizeof(header), "get-trl");
-	format_and_print(outf, level + 1, header, NULL);
-
-	snprintf(header, sizeof(header), "trl");
-	snprintf(value, sizeof(value), "0x%llx", trl);
-	format_and_print(outf, level + 2, header, value);
-
-	format_and_print(outf, level, NULL, NULL);
 }

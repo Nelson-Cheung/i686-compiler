@@ -137,7 +137,6 @@ struct mem_cgroup;
  *		if @file_name is not NULL, this is the directory that
  *		@file_name is relative to.
  * @file_name:	optional file name associated with event
- * @cookie:	inotify rename cookie
  *
  * free_group_priv - called when a group refcnt hits 0 to clean up the private union
  * freeing_mark - called when a mark is being destroyed for some reason.  The group
@@ -152,7 +151,7 @@ struct fsnotify_ops {
 			    struct fsnotify_iter_info *iter_info);
 	int (*handle_inode_event)(struct fsnotify_mark *mark, u32 mask,
 			    struct inode *inode, struct inode *dir,
-			    const struct qstr *file_name, u32 cookie);
+			    const struct qstr *file_name);
 	void (*free_group_priv)(struct fsnotify_group *group);
 	void (*freeing_mark)(struct fsnotify_mark *mark, struct fsnotify_group *group);
 	void (*free_event)(struct fsnotify_event *event);
@@ -167,6 +166,7 @@ struct fsnotify_ops {
  */
 struct fsnotify_event {
 	struct list_head list;
+	unsigned long objectid;	/* identifier for queue merges */
 };
 
 /*
@@ -206,6 +206,9 @@ struct fsnotify_group {
 
 	/* stores all fastpath marks assoc with this group so they can be cleaned on unregister */
 	struct mutex mark_mutex;	/* protect marks_list */
+	atomic_t num_marks;		/* 1 for each mark and 1 for not being
+					 * past the point of no return when freeing
+					 * a group */
 	atomic_t user_waits;		/* Number of tasks waiting for user
 					 * response */
 	struct list_head marks_list;	/* all inode marks for this group */
@@ -230,14 +233,13 @@ struct fsnotify_group {
 #endif
 #ifdef CONFIG_FANOTIFY
 		struct fanotify_group_private_data {
-			/* Hash table of events for merge */
-			struct hlist_head *merge_hash;
 			/* allows a group to block waiting for a userspace response */
 			struct list_head access_list;
 			wait_queue_head_t access_waitq;
 			int flags;           /* flags from fanotify_init() */
 			int f_flags; /* event_f_flags from fanotify_init() */
-			struct ucounts *ucounts;
+			unsigned int max_marks;
+			struct user_struct *user;
 		} fanotify_data;
 #endif /* CONFIG_FANOTIFY */
 	};
@@ -275,7 +277,7 @@ static inline const struct path *fsnotify_data_path(const void *data,
 
 enum fsnotify_obj_type {
 	FSNOTIFY_OBJ_TYPE_INODE,
-	FSNOTIFY_OBJ_TYPE_PARENT,
+	FSNOTIFY_OBJ_TYPE_CHILD,
 	FSNOTIFY_OBJ_TYPE_VFSMOUNT,
 	FSNOTIFY_OBJ_TYPE_SB,
 	FSNOTIFY_OBJ_TYPE_COUNT,
@@ -283,7 +285,7 @@ enum fsnotify_obj_type {
 };
 
 #define FSNOTIFY_OBJ_TYPE_INODE_FL	(1U << FSNOTIFY_OBJ_TYPE_INODE)
-#define FSNOTIFY_OBJ_TYPE_PARENT_FL	(1U << FSNOTIFY_OBJ_TYPE_PARENT)
+#define FSNOTIFY_OBJ_TYPE_CHILD_FL	(1U << FSNOTIFY_OBJ_TYPE_CHILD)
 #define FSNOTIFY_OBJ_TYPE_VFSMOUNT_FL	(1U << FSNOTIFY_OBJ_TYPE_VFSMOUNT)
 #define FSNOTIFY_OBJ_TYPE_SB_FL		(1U << FSNOTIFY_OBJ_TYPE_SB)
 #define FSNOTIFY_OBJ_ALL_TYPES_MASK	((1U << FSNOTIFY_OBJ_TYPE_COUNT) - 1)
@@ -328,7 +330,7 @@ static inline struct fsnotify_mark *fsnotify_iter_##name##_mark( \
 }
 
 FSNOTIFY_ITER_FUNCS(inode, INODE)
-FSNOTIFY_ITER_FUNCS(parent, PARENT)
+FSNOTIFY_ITER_FUNCS(child, CHILD)
 FSNOTIFY_ITER_FUNCS(vfsmount, VFSMOUNT)
 FSNOTIFY_ITER_FUNCS(sb, SB)
 
@@ -467,7 +469,6 @@ static inline void fsnotify_update_flags(struct dentry *dentry)
 
 /* create a new group */
 extern struct fsnotify_group *fsnotify_alloc_group(const struct fsnotify_ops *ops);
-extern struct fsnotify_group *fsnotify_alloc_user_group(const struct fsnotify_ops *ops);
 /* get reference to a group */
 extern void fsnotify_get_group(struct fsnotify_group *group);
 /* drop reference on a group from fsnotify_alloc_group */
@@ -484,23 +485,15 @@ extern void fsnotify_destroy_event(struct fsnotify_group *group,
 /* attach the event to the group notification queue */
 extern int fsnotify_add_event(struct fsnotify_group *group,
 			      struct fsnotify_event *event,
-			      int (*merge)(struct fsnotify_group *,
-					   struct fsnotify_event *),
-			      void (*insert)(struct fsnotify_group *,
-					     struct fsnotify_event *));
+			      int (*merge)(struct list_head *,
+					   struct fsnotify_event *));
 /* Queue overflow event to a notification group */
 static inline void fsnotify_queue_overflow(struct fsnotify_group *group)
 {
-	fsnotify_add_event(group, group->overflow_event, NULL, NULL);
+	fsnotify_add_event(group, group->overflow_event, NULL);
 }
 
-static inline bool fsnotify_notify_queue_is_empty(struct fsnotify_group *group)
-{
-	assert_spin_locked(&group->notification_lock);
-
-	return list_empty(&group->notification_list);
-}
-
+/* true if the group notification queue is empty */
 extern bool fsnotify_notify_queue_is_empty(struct fsnotify_group *group);
 /* return, but do not dequeue the first event on the notification queue */
 extern struct fsnotify_event *fsnotify_peek_first_event(struct fsnotify_group *group);
@@ -581,9 +574,11 @@ extern void fsnotify_put_mark(struct fsnotify_mark *mark);
 extern void fsnotify_finish_user_wait(struct fsnotify_iter_info *iter_info);
 extern bool fsnotify_prepare_user_wait(struct fsnotify_iter_info *iter_info);
 
-static inline void fsnotify_init_event(struct fsnotify_event *event)
+static inline void fsnotify_init_event(struct fsnotify_event *event,
+				       unsigned long objectid)
 {
 	INIT_LIST_HEAD(&event->list);
+	event->objectid = objectid;
 }
 
 #else

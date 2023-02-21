@@ -19,14 +19,12 @@
 #include <asm/macints.h>
 #include <asm/mac_iop.h>
 #include <asm/adb_iop.h>
-#include <asm/unaligned.h>
 
 #include <linux/adb.h>
 
 static struct adb_request *current_req;
 static struct adb_request *last_req;
 static unsigned int autopoll_devs;
-static u8 autopoll_addr;
 
 static enum adb_iop_state {
 	idle,
@@ -42,11 +40,6 @@ static int adb_iop_write(struct adb_request *);
 static int adb_iop_autopoll(int);
 static void adb_iop_poll(void);
 static int adb_iop_reset_bus(void);
-
-/* ADB command byte structure */
-#define ADDR_MASK       0xF0
-#define OP_MASK         0x0C
-#define TALK            0x0C
 
 struct adb_driver adb_iop_driver = {
 	.name         = "ISM IOP",
@@ -85,7 +78,10 @@ static void adb_iop_complete(struct iop_msg *msg)
 
 	local_irq_save(flags);
 
-	adb_iop_state = awaiting_reply;
+	if (current_req->reply_expected)
+		adb_iop_state = awaiting_reply;
+	else
+		adb_iop_done();
 
 	local_irq_restore(flags);
 }
@@ -93,52 +89,38 @@ static void adb_iop_complete(struct iop_msg *msg)
 /*
  * Listen for ADB messages from the IOP.
  *
- * This will be called when unsolicited IOP messages are received.
- * These IOP messages can carry ADB autopoll responses and also occur
- * after explicit ADB commands.
+ * This will be called when unsolicited messages (usually replies to TALK
+ * commands or autopoll packets) are received.
  */
 
 static void adb_iop_listen(struct iop_msg *msg)
 {
 	struct adb_iopmsg *amsg = (struct adb_iopmsg *)msg->message;
-	u8 addr = (amsg->cmd & ADDR_MASK) >> 4;
-	u8 op = amsg->cmd & OP_MASK;
 	unsigned long flags;
 	bool req_done = false;
 
 	local_irq_save(flags);
 
-	/* Responses to Talk commands may be unsolicited as they are
-	 * produced when the IOP polls devices. They are mostly timeouts.
+	/* Handle a timeout. Timeout packets seem to occur even after
+	 * we've gotten a valid reply to a TALK, presumably because of
+	 * autopolling.
 	 */
-	if (op == TALK && ((1 << addr) & autopoll_devs))
-		autopoll_addr = addr;
 
-	switch (amsg->flags & (ADB_IOP_EXPLICIT |
-			       ADB_IOP_AUTOPOLL |
-			       ADB_IOP_TIMEOUT)) {
-	case ADB_IOP_EXPLICIT:
-	case ADB_IOP_EXPLICIT | ADB_IOP_TIMEOUT:
+	if (amsg->flags & ADB_IOP_EXPLICIT) {
 		if (adb_iop_state == awaiting_reply) {
 			struct adb_request *req = current_req;
 
-			if (req->reply_expected) {
-				req->reply_len = amsg->count + 1;
-				memcpy(req->reply, &amsg->cmd, req->reply_len);
-			}
+			req->reply_len = amsg->count + 1;
+			memcpy(req->reply, &amsg->cmd, req->reply_len);
 
 			req_done = true;
 		}
-		break;
-	case ADB_IOP_AUTOPOLL:
-		if (((1 << addr) & autopoll_devs) &&
-		    amsg->cmd == ADB_READREG(addr, 0))
-			adb_input(&amsg->cmd, amsg->count + 1, 1);
-		break;
+	} else if (!(amsg->flags & ADB_IOP_TIMEOUT)) {
+		adb_input(&amsg->cmd, amsg->count + 1,
+			  amsg->flags & ADB_IOP_AUTOPOLL);
 	}
-	msg->reply[0] = autopoll_addr ? ADB_IOP_AUTOPOLL : 0;
-	msg->reply[1] = 0;
-	msg->reply[2] = autopoll_addr ? ADB_READREG(autopoll_addr, 0) : 0;
+
+	msg->reply[0] = autopoll_devs ? ADB_IOP_AUTOPOLL : 0;
 	iop_complete_message(msg);
 
 	if (req_done)
@@ -250,10 +232,7 @@ static void adb_iop_set_ap_complete(struct iop_msg *msg)
 {
 	struct adb_iopmsg *amsg = (struct adb_iopmsg *)msg->message;
 
-	autopoll_devs = get_unaligned_be16(amsg->data);
-	if (autopoll_devs & (1 << autopoll_addr))
-		return;
-	autopoll_addr = autopoll_devs ? (ffs(autopoll_devs) - 1) : 0;
+	autopoll_devs = (amsg->data[1] << 8) | amsg->data[0];
 }
 
 static int adb_iop_autopoll(int devs)
@@ -267,7 +246,8 @@ static int adb_iop_autopoll(int devs)
 	amsg.flags = ADB_IOP_SET_AUTOPOLL | (mask ? ADB_IOP_AUTOPOLL : 0);
 	amsg.count = 2;
 	amsg.cmd = 0;
-	put_unaligned_be16(mask, amsg.data);
+	amsg.data[0] = mask & 0xFF;
+	amsg.data[1] = (mask >> 8) & 0xFF;
 
 	iop_send_message(ADB_IOP, ADB_CHAN, NULL, sizeof(amsg), (__u8 *)&amsg,
 			 adb_iop_set_ap_complete);

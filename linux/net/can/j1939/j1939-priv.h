@@ -20,12 +20,9 @@
 
 struct j1939_session;
 enum j1939_sk_errqueue_type {
-	J1939_ERRQUEUE_TX_ACK,
-	J1939_ERRQUEUE_TX_SCHED,
-	J1939_ERRQUEUE_TX_ABORT,
-	J1939_ERRQUEUE_RX_RTS,
-	J1939_ERRQUEUE_RX_DPO,
-	J1939_ERRQUEUE_RX_ABORT,
+	J1939_ERRQUEUE_ACK,
+	J1939_ERRQUEUE_SCHED,
+	J1939_ERRQUEUE_ABORT,
 };
 
 /* j1939 devices */
@@ -90,7 +87,6 @@ struct j1939_priv {
 	struct list_head j1939_socks;
 
 	struct kref rx_kref;
-	u32 rx_tskey;
 };
 
 void j1939_ecu_put(struct j1939_ecu *ecu);
@@ -330,7 +326,6 @@ int j1939_session_activate(struct j1939_session *session);
 void j1939_tp_schedule_txtimer(struct j1939_session *session, int msec);
 void j1939_session_timers_cancel(struct j1939_session *session);
 
-#define J1939_MIN_TP_PACKET_SIZE 9
 #define J1939_MAX_TP_PACKET_SIZE (7 * 0xff)
 #define J1939_MAX_ETP_PACKET_SIZE (7 * 0x00ffffff)
 

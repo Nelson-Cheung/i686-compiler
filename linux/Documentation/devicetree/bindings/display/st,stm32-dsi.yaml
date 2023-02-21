@@ -29,6 +29,7 @@ properties:
       - description: DSI bus clock
       - description: Pixel clock
     minItems: 2
+    maxItems: 3
 
   clock-names:
     items:
@@ -36,6 +37,7 @@ properties:
       - const: ref
       - const: px_clk
     minItems: 2
+    maxItems: 3
 
   resets:
     maxItems: 1
@@ -49,16 +51,20 @@ properties:
       Phandle of the regulator that provides the supply voltage.
 
   ports:
-    $ref: /schemas/graph.yaml#/properties/ports
-
+    type: object
+    description:
+      A node containing DSI input & output port nodes with endpoint
+      definitions as documented in
+      Documentation/devicetree/bindings/media/video-interfaces.txt
+      Documentation/devicetree/bindings/graph.txt
     properties:
       port@0:
-        $ref: /schemas/graph.yaml#/properties/port
+        type: object
         description:
           DSI input port node, connected to the ltdc rgb output port.
 
       port@1:
-        $ref: /schemas/graph.yaml#/properties/port
+        type: object
         description:
           DSI output port node, connected to a panel or a bridge input port"
 

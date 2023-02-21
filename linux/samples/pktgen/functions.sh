@@ -108,12 +108,7 @@ function pgset() {
     fi
 }
 
-if [[ -z "$APPEND" ]]; then
-	if [[ $EUID -eq 0 ]]; then
-		# Cleanup pktgen setup on exit if thats not "append mode"
-		trap 'pg_ctrl "reset"' EXIT
-	fi
-fi
+[[ $EUID -eq 0 ]] && trap 'pg_ctrl "reset"' EXIT
 
 ## -- General shell tricks --
 
@@ -123,7 +118,7 @@ function root_check_run_with_sudo() {
     if [ "$EUID" -ne 0 ]; then
 	if [ -x $0 ]; then # Directly executable use sudo
 	    info "Not root, running with sudo"
-            sudo -E "$0" "$@"
+            sudo "$0" "$@"
             exit $?
 	fi
 	err 4 "cannot perform sudo run of $0"

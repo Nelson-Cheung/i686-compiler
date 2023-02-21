@@ -15,8 +15,7 @@ static int node_offset(void *fdt, const char *node_path)
 {
 	int offset = fdt_path_offset(fdt, node_path);
 	if (offset == -FDT_ERR_NOTFOUND)
-		/* Add the node to root if not found, dropping the leading '/' */
-		offset = fdt_add_subnode(fdt, 0, node_path + 1);
+		offset = fdt_add_subnode(fdt, 0, node_path);
 	return offset;
 }
 
@@ -121,7 +120,7 @@ static void hex_str(char *out, uint32_t value)
 /*
  * Convert and fold provided ATAGs into the provided FDT.
  *
- * Return values:
+ * REturn values:
  *    = 0 -> pretend success
  *    = 1 -> bad ATAG (may retry with another possible ATAG pointer)
  *    < 0 -> error from libfdt

@@ -32,6 +32,7 @@ properties:
 
   interrupts:
     minItems: 1
+    maxItems: 2
     items:
       - description: RTC Alarm 0
       - description: RTC Alarm 1
@@ -127,6 +128,7 @@ required:
   - compatible
   - reg
   - interrupts
+  - clocks
   - clock-output-names
 
 additionalProperties: false

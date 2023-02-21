@@ -465,7 +465,7 @@ int q6adm_matrix_map(struct device *dev, int path,
 	struct apr_pkt *pkt;
 	uint16_t *copps_list;
 	int pkt_size, ret, i, copp_idx;
-	void *matrix_map;
+	void *matrix_map = NULL;
 	struct q6copp *copp;
 
 	/* Assumes port_ids have already been validated during adm_open */
@@ -601,7 +601,14 @@ static int q6adm_probe(struct apr_device *adev)
 	INIT_LIST_HEAD(&adm->copps_list);
 	spin_lock_init(&adm->copps_list_lock);
 
-	return devm_of_platform_populate(dev);
+	return of_platform_populate(dev->of_node, NULL, NULL, dev);
+}
+
+static int q6adm_remove(struct apr_device *adev)
+{
+	of_platform_depopulate(&adev->dev);
+
+	return 0;
 }
 
 #ifdef CONFIG_OF
@@ -614,6 +621,7 @@ MODULE_DEVICE_TABLE(of, q6adm_device_id);
 
 static struct apr_driver qcom_q6adm_driver = {
 	.probe = q6adm_probe,
+	.remove = q6adm_remove,
 	.callback = q6adm_callback,
 	.driver = {
 		.name = "qcom-q6adm",

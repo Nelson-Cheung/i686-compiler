@@ -151,10 +151,8 @@ static int sun6i_video_start_streaming(struct vb2_queue *vq, unsigned int count)
 	}
 
 	subdev = sun6i_video_remote_subdev(video, NULL);
-	if (!subdev) {
-		ret = -EINVAL;
+	if (!subdev)
 		goto stop_media_pipeline;
-	}
 
 	config.pixelformat = video->fmt.fmt.pix.pixelformat;
 	config.code = video->mbus_code;
@@ -481,10 +479,8 @@ static int sun6i_video_open(struct file *file)
 		goto fh_release;
 
 	/* check if already powered */
-	if (!v4l2_fh_is_singular_file(file)) {
-		ret = -EBUSY;
+	if (!v4l2_fh_is_singular_file(file))
 		goto unlock;
-	}
 
 	ret = sun6i_csi_set_power(video->csi, true);
 	if (ret < 0)

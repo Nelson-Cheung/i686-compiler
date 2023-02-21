@@ -59,6 +59,7 @@ properties:
     description: u32 value representing regulator enable bit offset.
 
   vin-supply:
+    $ref: '/schemas/types.yaml#/definitions/phandle'
     description: input supply phandle.
 
 required:

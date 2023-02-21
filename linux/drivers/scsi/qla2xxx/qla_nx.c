@@ -489,26 +489,29 @@ qla82xx_rd_32(struct qla_hw_data *ha, ulong off_in)
 	return data;
 }
 
-/*
- * Context: task, might sleep
- */
+#define IDC_LOCK_TIMEOUT 100000000
 int qla82xx_idc_lock(struct qla_hw_data *ha)
 {
-	const int delay_ms = 100, timeout_ms = 2000;
-	int done, total = 0;
+	int i;
+	int done = 0, timeout = 0;
 
-	might_sleep();
-
-	while (true) {
+	while (!done) {
 		/* acquire semaphore5 from PCI HW block */
 		done = qla82xx_rd_32(ha, QLA82XX_PCIE_REG(PCIE_SEM5_LOCK));
 		if (done == 1)
 			break;
-		if (WARN_ON_ONCE(total >= timeout_ms))
+		if (timeout >= IDC_LOCK_TIMEOUT)
 			return -1;
 
-		total += delay_ms;
-		msleep(delay_ms);
+		timeout++;
+
+		/* Yield CPU */
+		if (!in_interrupt())
+			schedule();
+		else {
+			for (i = 0; i < 20; i++)
+				cpu_relax();
+		}
 	}
 
 	return 0;
@@ -962,7 +965,7 @@ qla82xx_read_status_reg(struct qla_hw_data *ha, uint32_t *val)
 static int
 qla82xx_flash_wait_write_finish(struct qla_hw_data *ha)
 {
-	uint32_t val = 0;
+	uint32_t val;
 	int i, ret;
 	scsi_qla_host_t *vha = pci_get_drvdata(ha->pdev);
 
@@ -1063,8 +1066,7 @@ qla82xx_write_flash_dword(struct qla_hw_data *ha, uint32_t flashaddr,
 		return ret;
 	}
 
-	ret = qla82xx_flash_set_write_enable(ha);
-	if (ret < 0)
+	if (qla82xx_flash_set_write_enable(ha))
 		goto done_write;
 
 	qla82xx_wr_32(ha, QLA82XX_ROMUSB_ROM_WDATA, data);
@@ -2166,6 +2168,7 @@ qla82xx_poll(int irq, void *dev_id)
 	struct qla_hw_data *ha;
 	struct rsp_que *rsp;
 	struct device_reg_82xx __iomem *reg;
+	int status = 0;
 	uint32_t stat;
 	uint32_t host_int = 0;
 	uint16_t mb[8];
@@ -2194,6 +2197,7 @@ qla82xx_poll(int irq, void *dev_id)
 		case 0x10:
 		case 0x11:
 			qla82xx_mbx_completion(vha, MSW(stat));
+			status |= MBX_INTERRUPT;
 			break;
 		case 0x12:
 			mb[0] = MSW(stat);

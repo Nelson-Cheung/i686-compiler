@@ -3,6 +3,8 @@
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
  *
+ * File: main_usb.c
+ *
  * Purpose: driver entry for initial, open, close, tx and rx.
  *
  * Author: Lyndon Chen
@@ -912,7 +914,6 @@ static int vnt_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 
 			vnt_mac_disable_keyentry(priv, key->hw_key_idx);
 		}
-		break;
 
 	default:
 		break;

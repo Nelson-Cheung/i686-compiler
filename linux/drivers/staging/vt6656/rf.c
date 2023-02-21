@@ -3,6 +3,8 @@
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
  *
+ * File: rf.c
+ *
  * Purpose: rf function code
  *
  * Author: Jerry Chen
@@ -685,7 +687,7 @@ static int vnt_rf_set_txpower(struct vnt_private *priv, u8 power,
 
 			if (hw_value < ARRAY_SIZE(vt3226d0_lo_current_table)) {
 				ret = vnt_rf_write_embedded(priv,
-							    vt3226d0_lo_current_table[hw_value]);
+					vt3226d0_lo_current_table[hw_value]);
 				if (ret)
 					return ret;
 			}

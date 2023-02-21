@@ -329,5 +329,5 @@ static int test(void)
 
 int main(void)
 {
-	return test_harness(test, "pkey_siginfo");
+	test_harness(test, "pkey_siginfo");
 }

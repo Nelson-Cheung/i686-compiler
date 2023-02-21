@@ -33,6 +33,7 @@
 #include <asm/io.h>
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
+#include <asm/kmap_types.h>
 #include <asm/fixmap.h>
 #include <asm/tlbflush.h>
 #include <asm/sections.h>
@@ -75,6 +76,7 @@ static void __init map_ram(void)
 	/* These mark extents of read-only kernel pages...
 	 * ...from vmlinux.lds.S
 	 */
+	struct memblock_region *region;
 
 	v = PAGE_OFFSET;
 
@@ -120,7 +122,7 @@ static void __init map_ram(void)
 		}
 
 		printk(KERN_INFO "%s: Memory: 0x%x-0x%x\n", __func__,
-		       start, end);
+		       region->base, region->base + region->size);
 	}
 }
 
@@ -128,6 +130,7 @@ void __init paging_init(void)
 {
 	extern void tlb_init(void);
 
+	unsigned long end;
 	int i;
 
 	printk(KERN_INFO "Setting up paging and PTEs.\n");
@@ -142,6 +145,8 @@ void __init paging_init(void)
 	 *  switch_mm)
 	 */
 	current_pgd[smp_processor_id()] = init_mm.pgd;
+
+	end = (unsigned long)__va(max_low_pfn * PAGE_SIZE);
 
 	map_ram();
 
@@ -206,6 +211,8 @@ void __init mem_init(void)
 
 	/* this will put all low memory onto the freelists */
 	memblock_free_all();
+
+	mem_init_print_info(NULL);
 
 	printk("mem_init_done ...........................................\n");
 	mem_init_done = 1;

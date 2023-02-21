@@ -13,8 +13,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/scatterlist.h>
 #include <crypto/internal/hash.h>
-#include <crypto/sha1.h>
-#include <crypto/sha2.h>
+#include <crypto/sha.h>
 #include <crypto/md5.h>
 #include "sun8i-ce.h"
 
@@ -263,13 +262,13 @@ int sun8i_ce_hash_run(struct crypto_engine *engine, void *breq)
 	u32 common;
 	u64 byte_count;
 	__le32 *bf;
-	void *buf = NULL;
+	void *buf;
 	int j, i, todo;
 	int nbw = 0;
 	u64 fill, min_fill;
 	__be64 *bebits;
 	__le64 *lebits;
-	void *result = NULL;
+	void *result;
 	u64 bs;
 	int digestsize;
 	dma_addr_t addr_res, addr_pad;
@@ -286,17 +285,13 @@ int sun8i_ce_hash_run(struct crypto_engine *engine, void *breq)
 
 	/* the padding could be up to two block. */
 	buf = kzalloc(bs * 2, GFP_KERNEL | GFP_DMA);
-	if (!buf) {
-		err = -ENOMEM;
-		goto theend;
-	}
+	if (!buf)
+		return -ENOMEM;
 	bf = (__le32 *)buf;
 
 	result = kzalloc(digestsize, GFP_KERNEL | GFP_DMA);
-	if (!result) {
-		err = -ENOMEM;
-		goto theend;
-	}
+	if (!result)
+		return -ENOMEM;
 
 	flow = rctx->flow;
 	chan = &ce->chanlist[flow];
@@ -405,15 +400,14 @@ int sun8i_ce_hash_run(struct crypto_engine *engine, void *breq)
 	err = sun8i_ce_run_task(ce, flow, crypto_tfm_alg_name(areq->base.tfm));
 
 	dma_unmap_single(ce->dev, addr_pad, j * 4, DMA_TO_DEVICE);
-	dma_unmap_sg(ce->dev, areq->src, sg_nents(areq->src),
-		     DMA_TO_DEVICE);
+	dma_unmap_sg(ce->dev, areq->src, nr_sgs, DMA_TO_DEVICE);
 	dma_unmap_single(ce->dev, addr_res, digestsize, DMA_FROM_DEVICE);
 
+	kfree(buf);
 
 	memcpy(areq->result, result, algt->alg.hash.halg.digestsize);
-theend:
-	kfree(buf);
 	kfree(result);
+theend:
 	crypto_finalize_hash_request(engine, breq, err);
 	return 0;
 }

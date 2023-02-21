@@ -193,10 +193,8 @@ static int adsp_start(struct rproc *rproc)
 
 	dev_pm_genpd_set_performance_state(adsp->dev, INT_MAX);
 	ret = pm_runtime_get_sync(adsp->dev);
-	if (ret) {
-		pm_runtime_put_noidle(adsp->dev);
+	if (ret)
 		goto disable_xo_clk;
-	}
 
 	ret = clk_bulk_prepare_enable(adsp->num_clks, adsp->clks);
 	if (ret) {
@@ -266,7 +264,7 @@ static int adsp_stop(struct rproc *rproc)
 	int handover;
 	int ret;
 
-	ret = qcom_q6v5_request_stop(&adsp->q6v5, adsp->sysmon);
+	ret = qcom_q6v5_request_stop(&adsp->q6v5);
 	if (ret == -ETIMEDOUT)
 		dev_err(adsp->dev, "timed out on wait\n");
 
@@ -281,7 +279,7 @@ static int adsp_stop(struct rproc *rproc)
 	return ret;
 }
 
-static void *adsp_da_to_va(struct rproc *rproc, u64 da, size_t len, bool *is_iomem)
+static void *adsp_da_to_va(struct rproc *rproc, u64 da, size_t len)
 {
 	struct qcom_adsp *adsp = (struct qcom_adsp *)rproc->priv;
 	int offset;
@@ -364,12 +362,15 @@ static int adsp_init_mmio(struct qcom_adsp *adsp,
 				struct platform_device *pdev)
 {
 	struct device_node *syscon;
+	struct resource *res;
 	int ret;
 
-	adsp->qdsp6ss_base = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(adsp->qdsp6ss_base)) {
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	adsp->qdsp6ss_base = devm_ioremap(&pdev->dev, res->start,
+			resource_size(res));
+	if (!adsp->qdsp6ss_base) {
 		dev_err(adsp->dev, "failed to map QDSP6SS registers\n");
-		return PTR_ERR(adsp->qdsp6ss_base);
+		return -ENOMEM;
 	}
 
 	syscon = of_parse_phandle(pdev->dev.of_node, "qcom,halt-regs", 0);

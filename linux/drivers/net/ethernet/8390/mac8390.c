@@ -175,6 +175,7 @@ static enum mac8390_type mac8390_ident(struct nubus_rsrc *fres)
 		default:
 			return MAC8390_APPLE;
 		}
+		break;
 
 	case NUBUS_DRSW_APPLE:
 		switch (fres->dr_hw) {
@@ -185,9 +186,11 @@ static enum mac8390_type mac8390_ident(struct nubus_rsrc *fres)
 		default:
 			return MAC8390_APPLE;
 		}
+		break;
 
 	case NUBUS_DRSW_ASANTE:
 		return MAC8390_ASANTE;
+		break;
 
 	case NUBUS_DRSW_TECHWORKS:
 	case NUBUS_DRSW_DAYNA2:
@@ -196,9 +199,11 @@ static enum mac8390_type mac8390_ident(struct nubus_rsrc *fres)
 			return MAC8390_CABLETRON;
 		else
 			return MAC8390_APPLE;
+		break;
 
 	case NUBUS_DRSW_FARALLON:
 		return MAC8390_FARALLON;
+		break;
 
 	case NUBUS_DRSW_KINETICS:
 		switch (fres->dr_hw) {
@@ -207,6 +212,7 @@ static enum mac8390_type mac8390_ident(struct nubus_rsrc *fres)
 		default:
 			return MAC8390_KINETICS;
 		}
+		break;
 
 	case NUBUS_DRSW_DAYNA:
 		/*
@@ -218,6 +224,7 @@ static enum mac8390_type mac8390_ident(struct nubus_rsrc *fres)
 			return MAC8390_NONE;
 		else
 			return MAC8390_DAYNA;
+		break;
 	}
 	return MAC8390_NONE;
 }
@@ -428,12 +435,13 @@ out:
 	return err;
 }
 
-static void mac8390_device_remove(struct nubus_board *board)
+static int mac8390_device_remove(struct nubus_board *board)
 {
 	struct net_device *dev = nubus_get_drvdata(board);
 
 	unregister_netdev(dev);
 	free_netdev(dev);
+	return 0;
 }
 
 static struct nubus_driver mac8390_driver = {

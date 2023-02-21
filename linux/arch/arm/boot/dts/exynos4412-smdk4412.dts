@@ -71,61 +71,61 @@
 	pinctrl-names = "default";
 	status = "okay";
 
-	key-1 {
+	key_1 {
 		keypad,row = <1>;
 		keypad,column = <3>;
 		linux,code = <2>;
 	};
 
-	key-2 {
+	key_2 {
 		keypad,row = <1>;
 		keypad,column = <4>;
 		linux,code = <3>;
 	};
 
-	key-3 {
+	key_3 {
 		keypad,row = <1>;
 		keypad,column = <5>;
 		linux,code = <4>;
 	};
 
-	key-4 {
+	key_4 {
 		keypad,row = <1>;
 		keypad,column = <6>;
 		linux,code = <5>;
 	};
 
-	key-5 {
+	key_5 {
 		keypad,row = <1>;
 		keypad,column = <7>;
 		linux,code = <6>;
 	};
 
-	key-A {
+	key_A {
 		keypad,row = <2>;
 		keypad,column = <6>;
 		linux,code = <30>;
 	};
 
-	key-B {
+	key_B {
 		keypad,row = <2>;
 		keypad,column = <7>;
 		linux,code = <48>;
 	};
 
-	key-C {
+	key_C {
 		keypad,row = <0>;
 		keypad,column = <5>;
 		linux,code = <46>;
 	};
 
-	key-D {
+	key_D {
 		keypad,row = <2>;
 		keypad,column = <5>;
 		linux,code = <32>;
 	};
 
-	key-E {
+	key_E {
 		keypad,row = <0>;
 		keypad,column = <7>;
 		linux,code = <18>;

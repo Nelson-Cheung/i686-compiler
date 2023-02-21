@@ -169,37 +169,6 @@ static void fsnotify_connector_destroy_workfn(struct work_struct *work)
 	}
 }
 
-static void fsnotify_get_inode_ref(struct inode *inode)
-{
-	ihold(inode);
-	atomic_long_inc(&inode->i_sb->s_fsnotify_connectors);
-}
-
-static void fsnotify_put_inode_ref(struct inode *inode)
-{
-	struct super_block *sb = inode->i_sb;
-
-	iput(inode);
-	if (atomic_long_dec_and_test(&sb->s_fsnotify_connectors))
-		wake_up_var(&sb->s_fsnotify_connectors);
-}
-
-static void fsnotify_get_sb_connectors(struct fsnotify_mark_connector *conn)
-{
-	struct super_block *sb = fsnotify_connector_sb(conn);
-
-	if (sb)
-		atomic_long_inc(&sb->s_fsnotify_connectors);
-}
-
-static void fsnotify_put_sb_connectors(struct fsnotify_mark_connector *conn)
-{
-	struct super_block *sb = fsnotify_connector_sb(conn);
-
-	if (sb && atomic_long_dec_and_test(&sb->s_fsnotify_connectors))
-		wake_up_var(&sb->s_fsnotify_connectors);
-}
-
 static void *fsnotify_detach_connector_from_object(
 					struct fsnotify_mark_connector *conn,
 					unsigned int *type)
@@ -213,13 +182,13 @@ static void *fsnotify_detach_connector_from_object(
 	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE) {
 		inode = fsnotify_conn_inode(conn);
 		inode->i_fsnotify_mask = 0;
+		atomic_long_inc(&inode->i_sb->s_fsnotify_inode_refs);
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_VFSMOUNT) {
 		fsnotify_conn_mount(conn)->mnt_fsnotify_mask = 0;
 	} else if (conn->type == FSNOTIFY_OBJ_TYPE_SB) {
 		fsnotify_conn_sb(conn)->s_fsnotify_mask = 0;
 	}
 
-	fsnotify_put_sb_connectors(conn);
 	rcu_assign_pointer(*(conn->obj), NULL);
 	conn->obj = NULL;
 	conn->type = FSNOTIFY_OBJ_TYPE_DETACHED;
@@ -240,12 +209,19 @@ static void fsnotify_final_mark_destroy(struct fsnotify_mark *mark)
 /* Drop object reference originally held by a connector */
 static void fsnotify_drop_object(unsigned int type, void *objp)
 {
+	struct inode *inode;
+	struct super_block *sb;
+
 	if (!objp)
 		return;
 	/* Currently only inode references are passed to be dropped */
 	if (WARN_ON_ONCE(type != FSNOTIFY_OBJ_TYPE_INODE))
 		return;
-	fsnotify_put_inode_ref(objp);
+	inode = objp;
+	sb = inode->i_sb;
+	iput(inode);
+	if (atomic_long_dec_and_test(&sb->s_fsnotify_inode_refs))
+		wake_up_var(&sb->s_fsnotify_inode_refs);
 }
 
 void fsnotify_put_mark(struct fsnotify_mark *mark)
@@ -415,6 +391,8 @@ void fsnotify_detach_mark(struct fsnotify_mark *mark)
 	list_del_init(&mark->g_list);
 	spin_unlock(&mark->lock);
 
+	atomic_dec(&group->num_marks);
+
 	/* Drop mark reference acquired in fsnotify_add_mark_locked() */
 	fsnotify_put_mark(mark);
 }
@@ -517,12 +495,8 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 		conn->fsid.val[0] = conn->fsid.val[1] = 0;
 		conn->flags = 0;
 	}
-	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE) {
-		inode = fsnotify_conn_inode(conn);
-		fsnotify_get_inode_ref(inode);
-	}
-	fsnotify_get_sb_connectors(conn);
-
+	if (conn->type == FSNOTIFY_OBJ_TYPE_INODE)
+		inode = igrab(fsnotify_conn_inode(conn));
 	/*
 	 * cmpxchg() provides the barrier so that readers of *connp can see
 	 * only initialized structure
@@ -530,8 +504,7 @@ static int fsnotify_attach_connector_to_object(fsnotify_connp_t *connp,
 	if (cmpxchg(connp, NULL, conn)) {
 		/* Someone else created list structure for us */
 		if (inode)
-			fsnotify_put_inode_ref(inode);
-		fsnotify_put_sb_connectors(conn);
+			iput(inode);
 		kmem_cache_free(fsnotify_mark_connector_cachep, conn);
 	}
 
@@ -683,6 +656,7 @@ int fsnotify_add_mark_locked(struct fsnotify_mark *mark,
 	mark->flags |= FSNOTIFY_MARK_FLAG_ALIVE | FSNOTIFY_MARK_FLAG_ATTACHED;
 
 	list_add(&mark->g_list, &group->marks_list);
+	atomic_inc(&group->num_marks);
 	fsnotify_get_mark(mark); /* for g_list */
 	spin_unlock(&mark->lock);
 
@@ -700,6 +674,7 @@ err:
 			 FSNOTIFY_MARK_FLAG_ATTACHED);
 	list_del_init(&mark->g_list);
 	spin_unlock(&mark->lock);
+	atomic_dec(&group->num_marks);
 
 	fsnotify_put_mark(mark);
 	return ret;

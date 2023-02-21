@@ -1010,7 +1010,6 @@ static int sprd_spi_remove(struct platform_device *pdev)
 
 	ret = pm_runtime_get_sync(ss->dev);
 	if (ret < 0) {
-		pm_runtime_put_noidle(ss->dev);
 		dev_err(ss->dev, "failed to resume SPI controller\n");
 		return ret;
 	}
@@ -1068,7 +1067,6 @@ static const struct of_device_id sprd_spi_of_match[] = {
 	{ .compatible = "sprd,sc9860-spi", },
 	{ /* sentinel */ }
 };
-MODULE_DEVICE_TABLE(of, sprd_spi_of_match);
 
 static struct platform_driver sprd_spi_driver = {
 	.driver = {

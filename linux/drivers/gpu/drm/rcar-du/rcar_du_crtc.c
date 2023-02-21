@@ -682,23 +682,20 @@ static void rcar_du_crtc_stop(struct rcar_du_crtc *rcrtc)
  */
 
 static int rcar_du_crtc_atomic_check(struct drm_crtc *crtc,
-				     struct drm_atomic_state *state)
+				     struct drm_crtc_state *state)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
-									  crtc);
-	struct rcar_du_crtc_state *rstate = to_rcar_crtc_state(crtc_state);
+	struct rcar_du_crtc_state *rstate = to_rcar_crtc_state(state);
 	struct drm_encoder *encoder;
 	int ret;
 
-	ret = rcar_du_cmm_check(crtc, crtc_state);
+	ret = rcar_du_cmm_check(crtc, state);
 	if (ret)
 		return ret;
 
 	/* Store the routes from the CRTC output to the DU outputs. */
 	rstate->outputs = 0;
 
-	drm_for_each_encoder_mask(encoder, crtc->dev,
-				  crtc_state->encoder_mask) {
+	drm_for_each_encoder_mask(encoder, crtc->dev, state->encoder_mask) {
 		struct rcar_du_encoder *renc;
 
 		/* Skip the writeback encoder. */
@@ -713,7 +710,7 @@ static int rcar_du_crtc_atomic_check(struct drm_crtc *crtc,
 }
 
 static void rcar_du_crtc_atomic_enable(struct drm_crtc *crtc,
-				       struct drm_atomic_state *state)
+				       struct drm_crtc_state *old_state)
 {
 	struct rcar_du_crtc *rcrtc = to_rcar_crtc(crtc);
 	struct rcar_du_crtc_state *rstate = to_rcar_crtc_state(crtc->state);
@@ -730,10 +727,13 @@ static void rcar_du_crtc_atomic_enable(struct drm_crtc *crtc,
 	 */
 	if (rcdu->info->lvds_clk_mask & BIT(rcrtc->index) &&
 	    rstate->outputs == BIT(RCAR_DU_OUTPUT_DPAD0)) {
-		struct drm_bridge *bridge = rcdu->lvds[rcrtc->index];
+		struct rcar_du_encoder *encoder =
+			rcdu->encoders[RCAR_DU_OUTPUT_LVDS0 + rcrtc->index];
 		const struct drm_display_mode *mode =
 			&crtc->state->adjusted_mode;
+		struct drm_bridge *bridge;
 
+		bridge = drm_bridge_chain_get_first_bridge(&encoder->base);
 		rcar_lvds_clk_enable(bridge, mode->clock * 1000);
 	}
 
@@ -748,10 +748,8 @@ static void rcar_du_crtc_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void rcar_du_crtc_atomic_disable(struct drm_crtc *crtc,
-					struct drm_atomic_state *state)
+					struct drm_crtc_state *old_state)
 {
-	struct drm_crtc_state *old_state = drm_atomic_get_old_crtc_state(state,
-									 crtc);
 	struct rcar_du_crtc *rcrtc = to_rcar_crtc(crtc);
 	struct rcar_du_crtc_state *rstate = to_rcar_crtc_state(old_state);
 	struct rcar_du_device *rcdu = rcrtc->dev;
@@ -761,12 +759,15 @@ static void rcar_du_crtc_atomic_disable(struct drm_crtc *crtc,
 
 	if (rcdu->info->lvds_clk_mask & BIT(rcrtc->index) &&
 	    rstate->outputs == BIT(RCAR_DU_OUTPUT_DPAD0)) {
-		struct drm_bridge *bridge = rcdu->lvds[rcrtc->index];
+		struct rcar_du_encoder *encoder =
+			rcdu->encoders[RCAR_DU_OUTPUT_LVDS0 + rcrtc->index];
+		struct drm_bridge *bridge;
 
 		/*
 		 * Disable the LVDS clock output, see
 		 * rcar_du_crtc_atomic_enable().
 		 */
+		bridge = drm_bridge_chain_get_first_bridge(&encoder->base);
 		rcar_lvds_clk_disable(bridge);
 	}
 
@@ -779,7 +780,7 @@ static void rcar_du_crtc_atomic_disable(struct drm_crtc *crtc,
 }
 
 static void rcar_du_crtc_atomic_begin(struct drm_crtc *crtc,
-				      struct drm_atomic_state *state)
+				      struct drm_crtc_state *old_crtc_state)
 {
 	struct rcar_du_crtc *rcrtc = to_rcar_crtc(crtc);
 
@@ -808,7 +809,7 @@ static void rcar_du_crtc_atomic_begin(struct drm_crtc *crtc,
 }
 
 static void rcar_du_crtc_atomic_flush(struct drm_crtc *crtc,
-				      struct drm_atomic_state *state)
+				      struct drm_crtc_state *old_crtc_state)
 {
 	struct rcar_du_crtc *rcrtc = to_rcar_crtc(crtc);
 	struct drm_device *dev = rcrtc->crtc.dev;
@@ -1138,6 +1139,7 @@ static const struct drm_crtc_funcs crtc_funcs_gen3 = {
 	.set_crc_source = rcar_du_crtc_set_crc_source,
 	.verify_crc_source = rcar_du_crtc_verify_crc_source,
 	.get_crc_sources = rcar_du_crtc_get_crc_sources,
+	.gamma_set = drm_atomic_helper_legacy_gamma_set,
 };
 
 /* -----------------------------------------------------------------------------
@@ -1250,7 +1252,7 @@ int rcar_du_crtc_create(struct rcar_du_group *rgrp, unsigned int swindex,
 	else
 		primary = &rgrp->planes[swindex % 2].plane;
 
-	ret = drm_crtc_init_with_planes(&rcdu->ddev, crtc, primary, NULL,
+	ret = drm_crtc_init_with_planes(rcdu->ddev, crtc, primary, NULL,
 					rcdu->info->gen <= 2 ?
 					&crtc_funcs_gen2 : &crtc_funcs_gen3,
 					NULL);

@@ -20,10 +20,30 @@ static int s3fwrn5_nci_prop_rsp(struct nci_dev *ndev, struct sk_buff *skb)
 	return 0;
 }
 
-const struct nci_driver_ops s3fwrn5_nci_prop_ops[4] = {
+static struct nci_driver_ops s3fwrn5_nci_prop_ops[] = {
+	{
+		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
+				NCI_PROP_AGAIN),
+		.rsp = s3fwrn5_nci_prop_rsp,
+	},
+	{
+		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
+				NCI_PROP_GET_RFREG),
+		.rsp = s3fwrn5_nci_prop_rsp,
+	},
 	{
 		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
 				NCI_PROP_SET_RFREG),
+		.rsp = s3fwrn5_nci_prop_rsp,
+	},
+	{
+		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
+				NCI_PROP_GET_RFREG_VER),
+		.rsp = s3fwrn5_nci_prop_rsp,
+	},
+	{
+		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
+				NCI_PROP_SET_RFREG_VER),
 		.rsp = s3fwrn5_nci_prop_rsp,
 	},
 	{
@@ -41,7 +61,18 @@ const struct nci_driver_ops s3fwrn5_nci_prop_ops[4] = {
 				NCI_PROP_FW_CFG),
 		.rsp = s3fwrn5_nci_prop_rsp,
 	},
+	{
+		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
+				NCI_PROP_WR_RESET),
+		.rsp = s3fwrn5_nci_prop_rsp,
+	},
 };
+
+void s3fwrn5_nci_get_prop_ops(struct nci_driver_ops **ops, size_t *n)
+{
+	*ops = s3fwrn5_nci_prop_ops;
+	*n = ARRAY_SIZE(s3fwrn5_nci_prop_ops);
+}
 
 #define S3FWRN5_RFREG_SECTION_SIZE 252
 

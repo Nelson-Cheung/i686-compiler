@@ -27,7 +27,6 @@
 #include "wmm.h"
 #include "11n.h"
 #include "pcie.h"
-#include "pcie_quirks.h"
 
 #define PCIE_VERSION	"1.0"
 #define DRV_NAME        "Marvell mwifiex PCIe"
@@ -411,9 +410,6 @@ static int mwifiex_pcie_probe(struct pci_dev *pdev,
 			return ret;
 	}
 
-	/* check quirks */
-	mwifiex_initialize_quirks(card);
-
 	if (mwifiex_add_card(card, &card->fw_done, &pcie_ops,
 			     MWIFIEX_PCIE, &pdev->dev)) {
 		pr_err("%s failed\n", __func__);
@@ -433,6 +429,7 @@ static void mwifiex_pcie_remove(struct pci_dev *pdev)
 	struct mwifiex_private *priv;
 	const struct mwifiex_pcie_card_reg *reg;
 	u32 fw_status;
+	int ret;
 
 	card = pci_get_drvdata(pdev);
 
@@ -444,7 +441,7 @@ static void mwifiex_pcie_remove(struct pci_dev *pdev)
 
 	reg = card->pcie.reg;
 	if (reg)
-		mwifiex_read_reg(adapter, reg->fw_status, &fw_status);
+		ret = mwifiex_read_reg(adapter, reg->fw_status, &fw_status);
 	else
 		fw_status = -1;
 
@@ -528,16 +525,7 @@ static void mwifiex_pcie_reset_prepare(struct pci_dev *pdev)
 	mwifiex_shutdown_sw(adapter);
 	clear_bit(MWIFIEX_IFACE_WORK_DEVICE_DUMP, &card->work_flags);
 	clear_bit(MWIFIEX_IFACE_WORK_CARD_RESET, &card->work_flags);
-
-	/* On MS Surface gen4+ devices FLR isn't effective to recover from
-	 * hangups, so we power-cycle the card instead.
-	 */
-	if (card->quirks & QUIRK_FW_RST_D3COLD)
-		mwifiex_pcie_reset_d3cold_quirk(pdev);
-
 	mwifiex_dbg(adapter, INFO, "%s, successful\n", __func__);
-
-	card->pci_reset_ongoing = true;
 }
 
 /*
@@ -566,8 +554,6 @@ static void mwifiex_pcie_reset_done(struct pci_dev *pdev)
 		dev_err(&pdev->dev, "reinit failed: %d\n", ret);
 	else
 		mwifiex_dbg(adapter, INFO, "%s, successful\n", __func__);
-
-	card->pci_reset_ongoing = false;
 }
 
 static const struct pci_error_handlers mwifiex_pcie_err_handler = {
@@ -582,7 +568,7 @@ static SIMPLE_DEV_PM_OPS(mwifiex_pcie_pm_ops, mwifiex_pcie_suspend,
 #endif
 
 /* PCI Device Driver */
-static struct pci_driver mwifiex_pcie = {
+static struct pci_driver __refdata mwifiex_pcie = {
 	.name     = "mwifiex_pcie",
 	.id_table = mwifiex_ids,
 	.probe    = mwifiex_pcie_probe,
@@ -1242,7 +1228,7 @@ static int mwifiex_pcie_delete_cmdrsp_buf(struct mwifiex_adapter *adapter)
 static int mwifiex_pcie_alloc_sleep_cookie_buf(struct mwifiex_adapter *adapter)
 {
 	struct pcie_service_card *card = adapter->card;
-	u32 *cookie;
+	u32 tmp;
 
 	card->sleep_cookie_vbase = dma_alloc_coherent(&card->dev->dev,
 						      sizeof(u32),
@@ -1253,11 +1239,13 @@ static int mwifiex_pcie_alloc_sleep_cookie_buf(struct mwifiex_adapter *adapter)
 			    "dma_alloc_coherent failed!\n");
 		return -ENOMEM;
 	}
-	cookie = (u32 *)card->sleep_cookie_vbase;
 	/* Init val of Sleep Cookie */
-	*cookie = FW_AWAKE_COOKIE;
+	tmp = FW_AWAKE_COOKIE;
+	put_unaligned(tmp, card->sleep_cookie_vbase);
 
-	mwifiex_dbg(adapter, INFO, "alloc_scook: sleep cookie=0x%x\n", *cookie);
+	mwifiex_dbg(adapter, INFO,
+		    "alloc_scook: sleep cookie=0x%x\n",
+		    get_unaligned(card->sleep_cookie_vbase));
 
 	return 0;
 }
@@ -3151,23 +3139,12 @@ static void mwifiex_cleanup_pcie(struct mwifiex_adapter *adapter)
 	struct pcie_service_card *card = adapter->card;
 	struct pci_dev *pdev = card->dev;
 	const struct mwifiex_pcie_card_reg *reg = card->pcie.reg;
+	int ret;
 	u32 fw_status;
 
-	/* Perform the cancel_work_sync() only when we're not resetting
-	 * the card. It's because that function never returns if we're
-	 * in reset path. If we're here when resetting the card, it means
-	 * that we failed to reset the card (reset failure path).
-	 */
-	if (!card->pci_reset_ongoing) {
-		mwifiex_dbg(adapter, MSG, "performing cancel_work_sync()...\n");
-		cancel_work_sync(&card->work);
-		mwifiex_dbg(adapter, MSG, "cancel_work_sync() done\n");
-	} else {
-		mwifiex_dbg(adapter, MSG,
-			    "skipped cancel_work_sync() because we're in card reset failure path\n");
-	}
+	cancel_work_sync(&card->work);
 
-	mwifiex_read_reg(adapter, reg->fw_status, &fw_status);
+	ret = mwifiex_read_reg(adapter, reg->fw_status, &fw_status);
 	if (fw_status == FIRMWARE_READY_PCIE) {
 		mwifiex_dbg(adapter, INFO,
 			    "Clearing driver ready signature\n");

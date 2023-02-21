@@ -1,9 +1,66 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
-/*
- * Copyright (C) 2014, 2018-2021 Intel Corporation
- * Copyright (C) 2014-2015 Intel Mobile Communications GmbH
- * Copyright (C) 2016-2017 Intel Deutschland GmbH
- */
+/******************************************************************************
+ *
+ * This file is provided under a dual BSD/GPLv2 license.  When using or
+ * redistributing this file, you may do so under either license.
+ *
+ * GPL LICENSE SUMMARY
+ *
+ * Copyright(c) 2014 Intel Corporation. All rights reserved.
+ * Copyright(c) 2014 - 2015 Intel Mobile Communications GmbH
+ * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
+ * Copyright (C) 2018 - 2020 Intel Corporation
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * The full GNU General Public License is included in this distribution
+ * in the file called COPYING.
+ *
+ * Contact Information:
+ *  Intel Linux Wireless <linuxwifi@intel.com>
+ * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
+ *
+ * BSD LICENSE
+ *
+ * Copyright(c) 2014 Intel Corporation. All rights reserved.
+ * Copyright(c) 2014 - 2015 Intel Mobile Communications GmbH
+ * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
+ * Copyright (C) 2018 - 2020 Intel Corporation
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *  * Neither the name Intel Corporation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *****************************************************************************/
+
 #ifndef __fw_error_dump_h__
 #define __fw_error_dump_h__
 
@@ -305,12 +362,11 @@ struct iwl_fw_ini_error_dump_header {
 /**
  * struct iwl_fw_ini_error_dump - ini region dump
  * @header: the header of this region
- * @data: data of memory ranges in this region,
- *	see &struct iwl_fw_ini_error_dump_range
+ * @ranges: the memory ranges of this region
  */
 struct iwl_fw_ini_error_dump {
 	struct iwl_fw_ini_error_dump_header header;
-	u8 data[];
+	struct iwl_fw_ini_error_dump_range ranges[];
 } __packed;
 
 /* This bit is used to differentiate between lmac and umac rxf */
@@ -400,13 +456,12 @@ struct iwl_fw_ini_dump_info {
  * struct iwl_fw_ini_err_table_dump - ini error table dump
  * @header: header of the region
  * @version: error table version
- * @data: data of memory ranges in this region,
- *	see &struct iwl_fw_ini_error_dump_range
+ * @ranges: the memory ranges of this this region
  */
 struct iwl_fw_ini_err_table_dump {
 	struct iwl_fw_ini_error_dump_header header;
 	__le32 version;
-	u8 data[];
+	struct iwl_fw_ini_error_dump_range ranges[];
 } __packed;
 
 /**
@@ -429,15 +484,14 @@ struct iwl_fw_error_dump_rb {
  * @write_ptr: write pointer position in the buffer
  * @cycle_cnt: cycles count
  * @cur_frag: current fragment in use
- * @data: data of memory ranges in this region,
- *	see &struct iwl_fw_ini_error_dump_range
+ * @ranges: the memory ranges of this this region
  */
 struct iwl_fw_ini_monitor_dump {
 	struct iwl_fw_ini_error_dump_header header;
 	__le32 write_ptr;
 	__le32 cycle_cnt;
 	__le32 cur_frag;
-	u8 data[];
+	struct iwl_fw_ini_error_dump_range ranges[];
 } __packed;
 
 /**
@@ -445,14 +499,13 @@ struct iwl_fw_ini_monitor_dump {
  * @header: header of the region
  * @type: type of special memory
  * @version: struct special memory version
- * @data: data of memory ranges in this region,
- *	see &struct iwl_fw_ini_error_dump_range
+ * @ranges: the memory ranges of this this region
  */
 struct iwl_fw_ini_special_device_memory {
 	struct iwl_fw_ini_error_dump_header header;
 	__le16 type;
 	__le16 version;
-	u8 data[];
+	struct iwl_fw_ini_error_dump_range ranges[];
 } __packed;
 
 /**

@@ -1365,7 +1365,6 @@ __acquires(oxu->lock)
 	switch (urb->status) {
 	case -EINPROGRESS:		/* success */
 		urb->status = 0;
-		break;
 	default:			/* fault */
 		break;
 	case -EREMOTEIO:		/* fault or normal */
@@ -4152,10 +4151,8 @@ static struct usb_hcd *oxu_create(struct platform_device *pdev,
 	oxu->is_otg = otg;
 
 	ret = usb_add_hcd(hcd, irq, IRQF_SHARED);
-	if (ret < 0) {
-		usb_put_hcd(hcd);
+	if (ret < 0)
 		return ERR_PTR(ret);
-	}
 
 	device_wakeup_enable(hcd->self.controller);
 	return hcd;

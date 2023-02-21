@@ -30,7 +30,6 @@ Power Management
     userland-swsusp
 
     powercap/powercap
-    powercap/dtpm
 
     regulator/consumer
     regulator/design

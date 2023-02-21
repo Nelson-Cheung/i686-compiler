@@ -408,18 +408,19 @@ static irqreturn_t tegra_adma_isr(int irq, void *dev_id)
 {
 	struct tegra_adma_chan *tdc = dev_id;
 	unsigned long status;
+	unsigned long flags;
 
-	spin_lock(&tdc->vc.lock);
+	spin_lock_irqsave(&tdc->vc.lock, flags);
 
 	status = tegra_adma_irq_clear(tdc);
 	if (status == 0 || !tdc->desc) {
-		spin_unlock(&tdc->vc.lock);
+		spin_unlock_irqrestore(&tdc->vc.lock, flags);
 		return IRQ_NONE;
 	}
 
 	vchan_cyclic_callback(&tdc->desc->vd);
 
-	spin_unlock(&tdc->vc.lock);
+	spin_unlock_irqrestore(&tdc->vc.lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -655,8 +656,9 @@ static int tegra_adma_alloc_chan_resources(struct dma_chan *dc)
 		return ret;
 	}
 
-	ret = pm_runtime_resume_and_get(tdc2dev(tdc));
+	ret = pm_runtime_get_sync(tdc2dev(tdc));
 	if (ret < 0) {
+		pm_runtime_put_noidle(tdc2dev(tdc));
 		free_irq(tdc->irq, tdc);
 		return ret;
 	}
@@ -868,8 +870,10 @@ static int tegra_adma_probe(struct platform_device *pdev)
 	pm_runtime_enable(&pdev->dev);
 
 	ret = pm_runtime_get_sync(&pdev->dev);
-	if (ret < 0)
+	if (ret < 0) {
+		pm_runtime_put_noidle(&pdev->dev);
 		goto rpm_disable;
+	}
 
 	ret = tegra_adma_init(tdma);
 	if (ret)

@@ -883,12 +883,10 @@ static int atmel_nand_pmecc_correct_data(struct nand_chip *chip, void *buf,
 							  NULL, 0,
 							  chip->ecc.strength);
 
-		if (ret >= 0) {
-			mtd->ecc_stats.corrected += ret;
+		if (ret >= 0)
 			max_bitflips = max(ret, max_bitflips);
-		} else {
+		else
 			mtd->ecc_stats.failed++;
-		}
 
 		databuf += chip->ecc.size;
 		eccbuf += chip->ecc.bytes;
@@ -1246,7 +1244,7 @@ static int atmel_smc_nand_prepare_smcconf(struct atmel_nand *nand,
 	nc = to_nand_controller(nand->base.controller);
 
 	/* DDR interface not supported. */
-	if (!nand_interface_is_sdr(conf))
+	if (conf->type != NAND_SDR_IFACE)
 		return -ENOTSUPP;
 
 	/*
@@ -1524,12 +1522,7 @@ static int atmel_nand_setup_interface(struct nand_chip *chip, int csline,
 				      const struct nand_interface_config *conf)
 {
 	struct atmel_nand *nand = to_atmel_nand(chip);
-	const struct nand_sdr_timings *sdr;
 	struct atmel_nand_controller *nc;
-
-	sdr = nand_get_sdr_timings(conf);
-	if (IS_ERR(sdr))
-		return PTR_ERR(sdr);
 
 	nc = to_nand_controller(nand->base.controller);
 
@@ -1634,8 +1627,10 @@ static struct atmel_nand *atmel_nand_create(struct atmel_nand_controller *nc,
 	}
 
 	nand = devm_kzalloc(nc->dev, struct_size(nand, cs, numcs), GFP_KERNEL);
-	if (!nand)
+	if (!nand) {
+		dev_err(nc->dev, "Failed to allocate NAND object\n");
 		return ERR_PTR(-ENOMEM);
+	}
 
 	nand->numcs = numcs;
 

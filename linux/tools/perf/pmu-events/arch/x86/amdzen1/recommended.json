@@ -10,7 +10,7 @@
     "EventName": "all_dc_accesses",
     "EventCode": "0x29",
     "BriefDescription": "All L1 Data Cache Accesses",
-    "UMask": "0x07"
+    "UMask": "0x7"
   },
   {
     "MetricName": "all_l2_cache_accesses",
@@ -79,10 +79,10 @@
     "UMask": "0x70"
   },
   {
-    "EventName": "l2_cache_hits_from_l2_hwpf",
-    "EventCode": "0x70",
+    "MetricName": "l2_cache_hits_from_l2_hwpf",
     "BriefDescription": "L2 Cache Hits from L2 HWPF",
-    "UMask": "0xff"
+    "MetricExpr": "l2_pf_hit_l2 + l2_pf_miss_l2_hit_l3 + l2_pf_miss_l2_l3",
+    "MetricGroup": "l2_cache"
   },
   {
     "EventName": "l3_accesses",

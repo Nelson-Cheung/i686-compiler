@@ -14,7 +14,6 @@
 #include <linux/pagemap.h>
 #include <linux/sched/mm.h>
 #include <linux/fsnotify.h>
-#include <linux/uio.h>
 
 #include "kernfs-internal.h"
 
@@ -181,10 +180,11 @@ static const struct seq_operations kernfs_seq_ops = {
  * it difficult to use seq_file.  Implement simplistic custom buffering for
  * bin files.
  */
-static ssize_t kernfs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+static ssize_t kernfs_file_direct_read(struct kernfs_open_file *of,
+				       char __user *user_buf, size_t count,
+				       loff_t *ppos)
 {
-	struct kernfs_open_file *of = kernfs_of(iocb->ki_filp);
-	ssize_t len = min_t(size_t, iov_iter_count(iter), PAGE_SIZE);
+	ssize_t len = min_t(size_t, count, PAGE_SIZE);
 	const struct kernfs_ops *ops;
 	char *buf;
 
@@ -210,7 +210,7 @@ static ssize_t kernfs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	of->event = atomic_read(&of->kn->attr.open->event);
 	ops = kernfs_ops(of->kn);
 	if (ops->read)
-		len = ops->read(of, buf, len, iocb->ki_pos);
+		len = ops->read(of, buf, len, *ppos);
 	else
 		len = -EINVAL;
 
@@ -220,12 +220,12 @@ static ssize_t kernfs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (len < 0)
 		goto out_free;
 
-	if (copy_to_iter(buf, len, iter) != len) {
+	if (copy_to_user(user_buf, buf, len)) {
 		len = -EFAULT;
 		goto out_free;
 	}
 
-	iocb->ki_pos += len;
+	*ppos += len;
 
  out_free:
 	if (buf == of->prealloc_buf)
@@ -235,14 +235,31 @@ static ssize_t kernfs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	return len;
 }
 
-static ssize_t kernfs_fop_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+/**
+ * kernfs_fop_read - kernfs vfs read callback
+ * @file: file pointer
+ * @user_buf: data to write
+ * @count: number of bytes
+ * @ppos: starting offset
+ */
+static ssize_t kernfs_fop_read(struct file *file, char __user *user_buf,
+			       size_t count, loff_t *ppos)
 {
-	if (kernfs_of(iocb->ki_filp)->kn->flags & KERNFS_HAS_SEQ_SHOW)
-		return seq_read_iter(iocb, iter);
-	return kernfs_file_read_iter(iocb, iter);
+	struct kernfs_open_file *of = kernfs_of(file);
+
+	if (of->kn->flags & KERNFS_HAS_SEQ_SHOW)
+		return seq_read(file, user_buf, count, ppos);
+	else
+		return kernfs_file_direct_read(of, user_buf, count, ppos);
 }
 
-/*
+/**
+ * kernfs_fop_write - kernfs vfs write callback
+ * @file: file pointer
+ * @user_buf: data to write
+ * @count: number of bytes
+ * @ppos: starting offset
+ *
  * Copy data in from userland and pass it to the matching kernfs write
  * operation.
  *
@@ -252,18 +269,20 @@ static ssize_t kernfs_fop_read_iter(struct kiocb *iocb, struct iov_iter *iter)
  * modify only the the value you're changing, then write entire buffer
  * back.
  */
-static ssize_t kernfs_fop_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+static ssize_t kernfs_fop_write(struct file *file, const char __user *user_buf,
+				size_t count, loff_t *ppos)
 {
-	struct kernfs_open_file *of = kernfs_of(iocb->ki_filp);
-	ssize_t len = iov_iter_count(iter);
+	struct kernfs_open_file *of = kernfs_of(file);
 	const struct kernfs_ops *ops;
+	ssize_t len;
 	char *buf;
 
 	if (of->atomic_write_len) {
+		len = count;
 		if (len > of->atomic_write_len)
 			return -E2BIG;
 	} else {
-		len = min_t(size_t, len, PAGE_SIZE);
+		len = min_t(size_t, count, PAGE_SIZE);
 	}
 
 	buf = of->prealloc_buf;
@@ -274,7 +293,7 @@ static ssize_t kernfs_fop_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (!buf)
 		return -ENOMEM;
 
-	if (copy_from_iter(buf, len, iter) != len) {
+	if (copy_from_user(buf, user_buf, len)) {
 		len = -EFAULT;
 		goto out_free;
 	}
@@ -293,7 +312,7 @@ static ssize_t kernfs_fop_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 
 	ops = kernfs_ops(of->kn);
 	if (ops->write)
-		len = ops->write(of, buf, len, iocb->ki_pos);
+		len = ops->write(of, buf, len, *ppos);
 	else
 		len = -EINVAL;
 
@@ -301,7 +320,7 @@ static ssize_t kernfs_fop_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	mutex_unlock(&of->mutex);
 
 	if (len > 0)
-		iocb->ki_pos += len;
+		*ppos += len;
 
 out_free:
 	if (buf == of->prealloc_buf)
@@ -654,7 +673,7 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
 
 	/*
 	 * Write path needs to atomic_write_len outside active reference.
-	 * Cache it in open_file.  See kernfs_fop_write_iter() for details.
+	 * Cache it in open_file.  See kernfs_fop_write() for details.
 	 */
 	of->atomic_write_len = ops->atomic_write_len;
 
@@ -860,7 +879,7 @@ repeat:
 	spin_unlock_irq(&kernfs_notify_lock);
 
 	/* kick fsnotify */
-	down_write(&kernfs_rwsem);
+	mutex_lock(&kernfs_mutex);
 
 	list_for_each_entry(info, &kernfs_root(kn)->supers, node) {
 		struct kernfs_node *parent;
@@ -898,7 +917,7 @@ repeat:
 		iput(inode);
 	}
 
-	up_write(&kernfs_rwsem);
+	mutex_unlock(&kernfs_mutex);
 	kernfs_put(kn);
 	goto repeat;
 }
@@ -941,16 +960,14 @@ void kernfs_notify(struct kernfs_node *kn)
 EXPORT_SYMBOL_GPL(kernfs_notify);
 
 const struct file_operations kernfs_file_fops = {
-	.read_iter	= kernfs_fop_read_iter,
-	.write_iter	= kernfs_fop_write_iter,
+	.read		= kernfs_fop_read,
+	.write		= kernfs_fop_write,
 	.llseek		= generic_file_llseek,
 	.mmap		= kernfs_fop_mmap,
 	.open		= kernfs_fop_open,
 	.release	= kernfs_fop_release,
 	.poll		= kernfs_fop_poll,
 	.fsync		= noop_fsync,
-	.splice_read	= generic_file_splice_read,
-	.splice_write	= iter_file_splice_write,
 };
 
 /**

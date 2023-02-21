@@ -159,8 +159,6 @@ KMS Core Structures and Functions
 .. kernel-doc:: drivers/gpu/drm/drm_mode_config.c
    :export:
 
-.. _kms_base_object_abstraction:
-
 Modeset Base Object Abstraction
 ===============================
 
@@ -321,15 +319,6 @@ CRTC Functions Reference
 .. kernel-doc:: drivers/gpu/drm/drm_crtc.c
    :export:
 
-Color Management Functions Reference
-------------------------------------
-
-.. kernel-doc:: drivers/gpu/drm/drm_color_mgmt.c
-   :export:
-
-.. kernel-doc:: include/drm/drm_color_mgmt.h
-   :internal:
-
 Frame Buffer Abstraction
 ========================
 
@@ -380,21 +369,6 @@ Plane Functions Reference
 
 .. kernel-doc:: drivers/gpu/drm/drm_plane.c
    :export:
-
-Plane Composition Functions Reference
--------------------------------------
-
-.. kernel-doc:: drivers/gpu/drm/drm_blend.c
-   :export:
-
-Plane Damage Tracking Functions Reference
------------------------------------------
-
-.. kernel-doc:: drivers/gpu/drm/drm_damage_helper.c
-   :export:
-
-.. kernel-doc:: include/drm/drm_damage_helper.h
-   :internal:
 
 Display Modes Function Reference
 ================================
@@ -462,38 +436,6 @@ KMS Locking
 KMS Properties
 ==============
 
-This section of the documentation is primarily aimed at user-space developers.
-For the driver APIs, see the other sections.
-
-Requirements
-------------
-
-KMS drivers might need to add extra properties to support new features. Each
-new property introduced in a driver needs to meet a few requirements, in
-addition to the one mentioned above:
-
-* It must be standardized, documenting:
-
-  * The full, exact, name string;
-  * If the property is an enum, all the valid value name strings;
-  * What values are accepted, and what these values mean;
-  * What the property does and how it can be used;
-  * How the property might interact with other, existing properties.
-
-* It must provide a generic helper in the core code to register that
-  property on the object it attaches to.
-
-* Its content must be decoded by the core and provided in the object's
-  associated state structure. That includes anything drivers might want
-  to precompute, like struct drm_clip_rect for planes.
-
-* Its initial state must match the behavior prior to the property
-  introduction. This might be a fixed value matching what the hardware
-  does, or it may be inherited from the state the firmware left the
-  system in during boot.
-
-* An IGT test must be submitted where reasonable.
-
 Property Types and Blob Property Support
 ----------------------------------------
 
@@ -524,29 +466,38 @@ Standard CRTC Properties
 .. kernel-doc:: drivers/gpu/drm/drm_crtc.c
    :doc: standard CRTC properties
 
-Standard Plane Properties
--------------------------
-
-.. kernel-doc:: drivers/gpu/drm/drm_plane.c
-   :doc: standard plane properties
-
 Plane Composition Properties
 ----------------------------
 
 .. kernel-doc:: drivers/gpu/drm/drm_blend.c
    :doc: overview
 
-Damage Tracking Properties
---------------------------
+.. kernel-doc:: drivers/gpu/drm/drm_blend.c
+   :export:
 
-.. kernel-doc:: drivers/gpu/drm/drm_plane.c
-   :doc: damage tracking
+FB_DAMAGE_CLIPS
+~~~~~~~~~~~~~~~
+
+.. kernel-doc:: drivers/gpu/drm/drm_damage_helper.c
+   :doc: overview
+
+.. kernel-doc:: drivers/gpu/drm/drm_damage_helper.c
+   :export:
+
+.. kernel-doc:: include/drm/drm_damage_helper.h
+   :internal:
 
 Color Management Properties
 ---------------------------
 
 .. kernel-doc:: drivers/gpu/drm/drm_color_mgmt.c
    :doc: overview
+
+.. kernel-doc:: drivers/gpu/drm/drm_color_mgmt.c
+   :export:
+
+.. kernel-doc:: include/drm/drm_color_mgmt.h
+   :internal:
 
 Tile Group Property
 -------------------

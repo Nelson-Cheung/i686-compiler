@@ -506,14 +506,10 @@ static int mac_sonic_platform_probe(struct platform_device *pdev)
 
 	err = register_netdev(dev);
 	if (err)
-		goto undo_probe;
+		goto out;
 
 	return 0;
 
-undo_probe:
-	dma_free_coherent(lp->device,
-			  SIZEOF_SONIC_DESC * SONIC_BUS_SCALE(lp->dma_bitmode),
-			  lp->descriptors, lp->descriptors_laddr);
 out:
 	free_netdev(dev);
 
@@ -588,22 +584,18 @@ static int mac_sonic_nubus_probe(struct nubus_board *board)
 
 	err = register_netdev(ndev);
 	if (err)
-		goto undo_probe;
+		goto out;
 
 	nubus_set_drvdata(board, ndev);
 
 	return 0;
 
-undo_probe:
-	dma_free_coherent(lp->device,
-			  SIZEOF_SONIC_DESC * SONIC_BUS_SCALE(lp->dma_bitmode),
-			  lp->descriptors, lp->descriptors_laddr);
 out:
 	free_netdev(ndev);
 	return err;
 }
 
-static void mac_sonic_nubus_remove(struct nubus_board *board)
+static int mac_sonic_nubus_remove(struct nubus_board *board)
 {
 	struct net_device *ndev = nubus_get_drvdata(board);
 	struct sonic_local *lp = netdev_priv(ndev);
@@ -613,6 +605,8 @@ static void mac_sonic_nubus_remove(struct nubus_board *board)
 			  SIZEOF_SONIC_DESC * SONIC_BUS_SCALE(lp->dma_bitmode),
 			  lp->descriptors, lp->descriptors_laddr);
 	free_netdev(ndev);
+
+	return 0;
 }
 
 static struct nubus_driver mac_sonic_nubus_driver = {

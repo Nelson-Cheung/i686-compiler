@@ -20,7 +20,8 @@ int sun8i_ss_prng_seed(struct crypto_rng *tfm, const u8 *seed,
 	struct sun8i_ss_rng_tfm_ctx *ctx = crypto_rng_ctx(tfm);
 
 	if (ctx->seed && ctx->slen != slen) {
-		kfree_sensitive(ctx->seed);
+		memzero_explicit(ctx->seed, ctx->slen);
+		kfree(ctx->seed);
 		ctx->slen = 0;
 		ctx->seed = NULL;
 	}
@@ -47,7 +48,8 @@ void sun8i_ss_prng_exit(struct crypto_tfm *tfm)
 {
 	struct sun8i_ss_rng_tfm_ctx *ctx = crypto_tfm_ctx(tfm);
 
-	kfree_sensitive(ctx->seed);
+	memzero_explicit(ctx->seed, ctx->slen);
+	kfree(ctx->seed);
 	ctx->seed = NULL;
 	ctx->slen = 0;
 }
@@ -101,8 +103,7 @@ int sun8i_ss_prng_generate(struct crypto_rng *tfm, const u8 *src,
 	dma_iv = dma_map_single(ss->dev, ctx->seed, ctx->slen, DMA_TO_DEVICE);
 	if (dma_mapping_error(ss->dev, dma_iv)) {
 		dev_err(ss->dev, "Cannot DMA MAP IV\n");
-		err = -EFAULT;
-		goto err_free;
+		return -EFAULT;
 	}
 
 	dma_dst = dma_map_single(ss->dev, d, todo, DMA_FROM_DEVICE);
@@ -165,8 +166,8 @@ err_iv:
 		/* Update seed */
 		memcpy(ctx->seed, d + dlen, ctx->slen);
 	}
-err_free:
-	kfree_sensitive(d);
+	memzero_explicit(d, todo);
+	kfree(d);
 
 	return err;
 }

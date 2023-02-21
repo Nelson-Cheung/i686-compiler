@@ -596,7 +596,7 @@ static void persistent_dtr(struct dm_exception_store *store)
 	free_area(ps);
 
 	/* Allocated in persistent_read_metadata */
-	kvfree(ps->callbacks);
+	vfree(ps->callbacks);
 
 	kfree(ps);
 }
@@ -621,8 +621,8 @@ static int persistent_read_metadata(struct dm_exception_store *store,
 	 */
 	ps->exceptions_per_area = (ps->store->chunk_size << SECTOR_SHIFT) /
 				  sizeof(struct disk_exception);
-	ps->callbacks = kvcalloc(ps->exceptions_per_area,
-				 sizeof(*ps->callbacks), GFP_KERNEL);
+	ps->callbacks = dm_vcalloc(ps->exceptions_per_area,
+				   sizeof(*ps->callbacks));
 	if (!ps->callbacks)
 		return -ENOMEM;
 
@@ -908,10 +908,6 @@ static unsigned persistent_status(struct dm_exception_store *store,
 	case STATUSTYPE_TABLE:
 		DMEMIT(" %s %llu", store->userspace_supports_overflow ? "PO" : "P",
 		       (unsigned long long)store->chunk_size);
-		break;
-	case STATUSTYPE_IMA:
-		*result = '\0';
-		break;
 	}
 
 	return sz;

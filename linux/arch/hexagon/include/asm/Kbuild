@@ -2,4 +2,5 @@
 generic-y += extable.h
 generic-y += iomap.h
 generic-y += kvm_para.h
+generic-y += local64.h
 generic-y += mcs_spinlock.h

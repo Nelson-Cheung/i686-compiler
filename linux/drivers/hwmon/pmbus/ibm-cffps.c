@@ -50,9 +50,9 @@
 #define CFFPS_MFR_VAUX_FAULT			BIT(6)
 #define CFFPS_MFR_CURRENT_SHARE_WARNING		BIT(7)
 
-#define CFFPS_LED_BLINK				(BIT(0) | BIT(6))
-#define CFFPS_LED_ON				(BIT(1) | BIT(6))
-#define CFFPS_LED_OFF				(BIT(2) | BIT(6))
+#define CFFPS_LED_BLINK				BIT(0)
+#define CFFPS_LED_ON				BIT(1)
+#define CFFPS_LED_OFF				BIT(2)
 #define CFFPS_BLINK_RATE_MS			250
 
 enum {
@@ -171,14 +171,8 @@ static ssize_t ibm_cffps_debugfs_read(struct file *file, char __user *buf,
 		cmd = CFFPS_SN_CMD;
 		break;
 	case CFFPS_DEBUGFS_MAX_POWER_OUT:
-		if (psu->version == cffps1) {
-			rc = i2c_smbus_read_word_swapped(psu->client,
-					CFFPS_MAX_POWER_OUT_CMD);
-		} else {
-			rc = i2c_smbus_read_word_data(psu->client,
-					CFFPS_MAX_POWER_OUT_CMD);
-		}
-
+		rc = i2c_smbus_read_word_swapped(psu->client,
+						 CFFPS_MAX_POWER_OUT_CMD);
 		if (rc < 0)
 			return rc;
 
@@ -478,7 +472,7 @@ static struct pmbus_driver_info ibm_cffps_info[] = {
 };
 
 static struct pmbus_platform_data ibm_cffps_pdata = {
-	.flags = PMBUS_SKIP_STATUS_CHECK | PMBUS_NO_CAPABILITY,
+	.flags = PMBUS_SKIP_STATUS_CHECK,
 };
 
 static int ibm_cffps_probe(struct i2c_client *client)
@@ -623,6 +617,7 @@ static struct i2c_driver ibm_cffps_driver = {
 		.of_match_table = ibm_cffps_of_match,
 	},
 	.probe_new = ibm_cffps_probe,
+	.remove = pmbus_do_remove,
 	.id_table = ibm_cffps_id,
 };
 
@@ -631,4 +626,3 @@ module_i2c_driver(ibm_cffps_driver);
 MODULE_AUTHOR("Eddie James");
 MODULE_DESCRIPTION("PMBus driver for IBM Common Form Factor power supplies");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(PMBUS);

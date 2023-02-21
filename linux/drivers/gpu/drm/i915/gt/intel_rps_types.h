@@ -1,5 +1,6 @@
-/* SPDX-License-Identifier: MIT */
 /*
+ * SPDX-License-Identifier: MIT
+ *
  * Copyright © 2019 Intel Corporation
  */
 
@@ -92,7 +93,7 @@ struct intel_rps {
 	} power;
 
 	atomic_t num_waiters;
-	unsigned int boosts;
+	atomic_t boosts;
 
 	/* manual wa residency calculations */
 	struct intel_rps_ei ei;

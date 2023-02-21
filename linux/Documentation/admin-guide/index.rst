@@ -19,7 +19,6 @@ etc.
    sysctl/index
 
    abi
-   features
 
 This section describes CPU vulnerabilities and their mitigations.
 
@@ -34,7 +33,7 @@ problems and bugs in particular.
 .. toctree::
    :maxdepth: 1
 
-   reporting-issues
+   reporting-bugs
    security-bugs
    bug-hunting
    bug-bisect
@@ -112,13 +111,13 @@ configure specific aspects of kernel behavior to your liking.
    rtc
    serial-console
    svga
-   syscall-user-dispatch
    sysrq
    thunderbolt
    ufs
    unicode
    vga-softcursor
    video-output
+   wimax/index
    xfs
 
 .. only::  subproject and html

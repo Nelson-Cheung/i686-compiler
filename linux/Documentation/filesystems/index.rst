@@ -34,7 +34,6 @@ algorithms work.
    quota
    seq_file
    sharedsubtree
-   idmappings
 
    automount-support
 
@@ -54,7 +53,6 @@ filesystem implementations.
    journalling
    fscrypt
    fsverity
-   netfs_library
 
 Filesystems
 ===========
@@ -73,12 +71,11 @@ Documentation for filesystem implementations.
    befs
    bfs
    btrfs
-   cifs/index
+   cifs/cifsroot
    ceph
    coda
    configfs
    cramfs
-   dax
    debugfs
    dlmfs
    ecryptfs
@@ -86,7 +83,6 @@ Documentation for filesystem implementations.
    erofs
    ext2
    ext3
-   ext4/index
    f2fs
    gfs2
    gfs2-uevents
@@ -101,7 +97,6 @@ Documentation for filesystem implementations.
    nilfs2
    nfs/index
    ntfs
-   ntfs3
    ocfs2
    ocfs2-online-filecheck
    omfs
@@ -118,7 +113,7 @@ Documentation for filesystem implementations.
    sysv-fs
    tmpfs
    ubifs
-   ubifs-authentication
+   ubifs-authentication.rst
    udf
    virtiofs
    vfat

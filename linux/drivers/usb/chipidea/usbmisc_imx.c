@@ -686,16 +686,6 @@ static int imx7d_charger_secondary_detection(struct imx_usbmisc_data *data)
 	int val;
 	unsigned long flags;
 
-	/* Clear VDATSRCENB0 to disable VDP_SRC and IDM_SNK required by BC 1.2 spec */
-	spin_lock_irqsave(&usbmisc->lock, flags);
-	val = readl(usbmisc->base + MX7D_USB_OTG_PHY_CFG2);
-	val &= ~MX7D_USB_OTG_PHY_CFG2_CHRG_VDATSRCENB0;
-	writel(val, usbmisc->base + MX7D_USB_OTG_PHY_CFG2);
-	spin_unlock_irqrestore(&usbmisc->lock, flags);
-
-	/* TVDMSRC_DIS */
-	msleep(20);
-
 	/* VDM_SRC is connected to D- and IDP_SINK is connected to D+ */
 	spin_lock_irqsave(&usbmisc->lock, flags);
 	val = readl(usbmisc->base + MX7D_USB_OTG_PHY_CFG2);
@@ -705,8 +695,7 @@ static int imx7d_charger_secondary_detection(struct imx_usbmisc_data *data)
 				usbmisc->base + MX7D_USB_OTG_PHY_CFG2);
 	spin_unlock_irqrestore(&usbmisc->lock, flags);
 
-	/* TVDMSRC_ON */
-	msleep(40);
+	usleep_range(1000, 2000);
 
 	/*
 	 * Per BC 1.2, check voltage of D+:
@@ -809,8 +798,7 @@ static int imx7d_charger_primary_detection(struct imx_usbmisc_data *data)
 				usbmisc->base + MX7D_USB_OTG_PHY_CFG2);
 	spin_unlock_irqrestore(&usbmisc->lock, flags);
 
-	/* TVDPSRC_ON */
-	msleep(40);
+	usleep_range(1000, 2000);
 
 	/* Check if D- is less than VDAT_REF to determine an SDP per BC 1.2 */
 	val = readl(usbmisc->base + MX7D_USB_OTG_PHY_STATUS);
@@ -1146,6 +1134,11 @@ MODULE_DEVICE_TABLE(of, usbmisc_imx_dt_ids);
 static int usbmisc_imx_probe(struct platform_device *pdev)
 {
 	struct imx_usbmisc *data;
+	const struct of_device_id *of_id;
+
+	of_id = of_match_device(usbmisc_imx_dt_ids, &pdev->dev);
+	if (!of_id)
+		return -ENODEV;
 
 	data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
@@ -1157,7 +1150,7 @@ static int usbmisc_imx_probe(struct platform_device *pdev)
 	if (IS_ERR(data->base))
 		return PTR_ERR(data->base);
 
-	data->ops = of_device_get_match_data(&pdev->dev);
+	data->ops = (const struct usbmisc_ops *)of_id->data;
 	platform_set_drvdata(pdev, data);
 
 	return 0;

@@ -101,8 +101,11 @@ ENTRY(EV_MachineCheck)
 	lr  r0, [efa]
 	mov r1, sp
 
-	; MC excpetions disable MMU
-	ARC_MMU_REENABLE r3
+	; hardware auto-disables MMU, re-enable it to allow kernel vaddr
+	; access for say stack unwinding of modules for crash dumps
+	lr	r3, [ARC_REG_PID]
+	or	r3, r3, MMU_ENABLE
+	sr	r3, [ARC_REG_PID]
 
 	lsr  	r3, r2, 8
 	bmsk 	r3, r3, 7
@@ -174,7 +177,7 @@ tracesys:
 
 	; Do the Sys Call as we normally would.
 	; Validate the Sys Call number
-	cmp     r8,  NR_syscalls - 1
+	cmp     r8,  NR_syscalls
 	mov.hi  r0, -ENOSYS
 	bhi     tracesys_exit
 
@@ -252,7 +255,7 @@ ENTRY(EV_Trap)
 	;============ Normal syscall case
 
 	; syscall num shd not exceed the total system calls avail
-	cmp     r8,  NR_syscalls - 1
+	cmp     r8,  NR_syscalls
 	mov.hi  r0, -ENOSYS
 	bhi     .Lret_from_system_call
 
@@ -304,8 +307,7 @@ resume_user_mode_begin:
 	mov r0, sp	; pt_regs for arg to do_signal()/do_notify_resume()
 
 	GET_CURR_THR_INFO_FLAGS   r9
-	and.f  0,  r9, _TIF_SIGPENDING|_TIF_NOTIFY_SIGNAL
-	bz .Lchk_notify_resume
+	bbit0  r9, TIF_SIGPENDING, .Lchk_notify_resume
 
 	; Normal Trap/IRQ entry only saves Scratch (caller-saved) regs
 	; in pt_reg since the "C" ABI (kernel code) will automatically

@@ -22,8 +22,6 @@
 #include <linux/workqueue.h>
 #include <linux/proc_fs.h>
 #include <linux/pgtable.h>
-#include <linux/debugfs.h>
-
 #include <asm/processor.h>
 #include <asm/mmu.h>
 #include <asm/page.h>
@@ -41,6 +39,7 @@
 #include <asm/kexec.h>
 #include <asm/fadump.h>
 #include <asm/asm-prototypes.h>
+#include <asm/debugfs.h>
 #include <asm/dtl.h>
 
 #include "pseries.h"
@@ -262,7 +261,7 @@ static int cpu_relative_dispatch_distance(int last_disp_cpu, int cur_disp_cpu)
 	if (!last_disp_cpu_assoc || !cur_disp_cpu_assoc)
 		return -EIO;
 
-	return cpu_relative_distance(last_disp_cpu_assoc, cur_disp_cpu_assoc);
+	return cpu_distance(last_disp_cpu_assoc, cur_disp_cpu_assoc);
 }
 
 static int cpu_home_node_dispatch_distance(int disp_cpu)
@@ -282,7 +281,7 @@ static int cpu_home_node_dispatch_distance(int disp_cpu)
 	if (!disp_cpu_assoc || !vcpu_assoc)
 		return -EIO;
 
-	return cpu_relative_distance(disp_cpu_assoc, vcpu_assoc);
+	return cpu_distance(disp_cpu_assoc, vcpu_assoc);
 }
 
 static void update_vcpu_disp_stat(int disp_cpu)
@@ -802,8 +801,7 @@ static long pSeries_lpar_hpte_remove(unsigned long hpte_group)
 	return -1;
 }
 
-/* Called during kexec sequence with MMU off */
-static notrace void manual_hpte_clear_all(void)
+static void manual_hpte_clear_all(void)
 {
 	unsigned long size_bytes = 1UL << ppc64_pft_size;
 	unsigned long hpte_count = size_bytes >> 4;
@@ -836,8 +834,7 @@ static notrace void manual_hpte_clear_all(void)
 	}
 }
 
-/* Called during kexec sequence with MMU off */
-static notrace int hcall_hpte_clear_all(void)
+static int hcall_hpte_clear_all(void)
 {
 	int rc;
 
@@ -848,8 +845,7 @@ static notrace int hcall_hpte_clear_all(void)
 	return rc;
 }
 
-/* Called during kexec sequence with MMU off */
-static notrace void pseries_hpte_clear_all(void)
+static void pseries_hpte_clear_all(void)
 {
 	int rc;
 
@@ -891,8 +887,7 @@ static long pSeries_lpar_hpte_updatepp(unsigned long slot,
 
 	want_v = hpte_encode_avpn(vpn, psize, ssize);
 
-	flags = (newpp & (HPTE_R_PP | HPTE_R_N | HPTE_R_KEY_LO)) | H_AVPN;
-	flags |= (newpp & HPTE_R_KEY_HI) >> 48;
+	flags = (newpp & 7) | H_AVPN;
 	if (mmu_has_feature(MMU_FTR_KERNEL_RO))
 		/* Move pp0 into bit 8 (IBM 55) */
 		flags |= (newpp & HPTE_R_PP0) >> 55;
@@ -981,12 +976,10 @@ static void pSeries_lpar_hpte_updateboltedpp(unsigned long newpp,
 	slot = pSeries_lpar_hpte_find(vpn, psize, ssize);
 	BUG_ON(slot == -1);
 
-	flags = newpp & (HPTE_R_PP | HPTE_R_N);
+	flags = newpp & 7;
 	if (mmu_has_feature(MMU_FTR_KERNEL_RO))
 		/* Move pp0 into bit 8 (IBM 55) */
 		flags |= (newpp & HPTE_R_PP0) >> 55;
-
-	flags |= ((newpp & HPTE_R_KEY_HI) >> 48) | (newpp & HPTE_R_KEY_LO);
 
 	lpar_rc = plpar_pte_protect(flags, slot, 0);
 
@@ -1636,7 +1629,7 @@ static int pseries_lpar_resize_hpt(unsigned long shift)
 		}
 		msleep(delay);
 		rc = plpar_resize_hpt_prepare(0, shift);
-	}
+	};
 
 	switch (rc) {
 	case H_SUCCESS:
@@ -1833,28 +1826,30 @@ void hcall_tracepoint_unregfunc(void)
 #endif
 
 /*
- * Keep track of hcall tracing depth and prevent recursion. Warn if any is
- * detected because it may indicate a problem. This will not catch all
- * problems with tracing code making hcalls, because the tracing might have
- * been invoked from a non-hcall, so the first hcall could recurse into it
- * without warning here, but this better than nothing.
- *
- * Hcalls with specific problems being traced should use the _notrace
- * plpar_hcall variants.
+ * Since the tracing code might execute hcalls we need to guard against
+ * recursion. One example of this are spinlocks calling H_YIELD on
+ * shared processor partitions.
  */
 static DEFINE_PER_CPU(unsigned int, hcall_trace_depth);
 
 
-notrace void __trace_hcall_entry(unsigned long opcode, unsigned long *args)
+void __trace_hcall_entry(unsigned long opcode, unsigned long *args)
 {
 	unsigned long flags;
 	unsigned int *depth;
+
+	/*
+	 * We cannot call tracepoints inside RCU idle regions which
+	 * means we must not trace H_CEDE.
+	 */
+	if (opcode == H_CEDE)
+		return;
 
 	local_irq_save(flags);
 
 	depth = this_cpu_ptr(&hcall_trace_depth);
 
-	if (WARN_ON_ONCE(*depth))
+	if (*depth)
 		goto out;
 
 	(*depth)++;
@@ -1866,16 +1861,19 @@ out:
 	local_irq_restore(flags);
 }
 
-notrace void __trace_hcall_exit(long opcode, long retval, unsigned long *retbuf)
+void __trace_hcall_exit(long opcode, long retval, unsigned long *retbuf)
 {
 	unsigned long flags;
 	unsigned int *depth;
+
+	if (opcode == H_CEDE)
+		return;
 
 	local_irq_save(flags);
 
 	depth = this_cpu_ptr(&hcall_trace_depth);
 
-	if (*depth) /* Don't warn again on the way out */
+	if (*depth)
 		goto out;
 
 	(*depth)++;
@@ -2020,7 +2018,7 @@ static int __init vpa_debugfs_init(void)
 	if (!firmware_has_feature(FW_FEATURE_SPLPAR))
 		return 0;
 
-	vpa_dir = debugfs_create_dir("vpa", arch_debugfs_dir);
+	vpa_dir = debugfs_create_dir("vpa", powerpc_debugfs_root);
 
 	/* set up the per-cpu vpa file*/
 	for_each_possible_cpu(i) {

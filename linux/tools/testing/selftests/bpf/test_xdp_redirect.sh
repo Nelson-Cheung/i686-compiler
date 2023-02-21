@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Create 2 namespaces with two veth peers, and
 # forward packets in-between using generic XDP
 #
@@ -57,8 +57,12 @@ test_xdp_redirect()
 	ip link set dev veth1 $xdpmode obj test_xdp_redirect.o sec redirect_to_222 &> /dev/null
 	ip link set dev veth2 $xdpmode obj test_xdp_redirect.o sec redirect_to_111 &> /dev/null
 
-	if ip netns exec ns1 ping -c 1 10.1.1.22 &> /dev/null &&
-	   ip netns exec ns2 ping -c 1 10.1.1.11 &> /dev/null; then
+	ip netns exec ns1 ping -c 1 10.1.1.22 &> /dev/null
+	local ret1=$?
+	ip netns exec ns2 ping -c 1 10.1.1.11 &> /dev/null
+	local ret2=$?
+
+	if [ $ret1 -eq 0 -a $ret2 -eq 0 ]; then
 		echo "selftests: test_xdp_redirect $xdpmode [PASS]";
 	else
 		ret=1

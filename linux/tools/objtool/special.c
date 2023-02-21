@@ -11,11 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <arch/special.h>
-#include <objtool/builtin.h>
-#include <objtool/special.h>
-#include <objtool/warn.h>
-#include <objtool/endianness.h>
+#include "builtin.h"
+#include "special.h"
+#include "warn.h"
+#include "arch_special.h"
 
 struct special_entry {
 	const char *sec;
@@ -23,7 +22,6 @@ struct special_entry {
 	unsigned char size, orig, new;
 	unsigned char orig_len, new_len; /* group only */
 	unsigned char feature; /* ALTERNATIVE macro CPU feature */
-	unsigned char key; /* jump_label key */
 };
 
 struct special_entry entries[] = {
@@ -43,7 +41,6 @@ struct special_entry entries[] = {
 		.size = JUMP_ENTRY_SIZE,
 		.orig = JUMP_ORIG_OFFSET,
 		.new = JUMP_NEW_OFFSET,
-		.key = JUMP_KEY_OFFSET,
 	},
 	{
 		.sec = "__ex_table",
@@ -56,13 +53,6 @@ struct special_entry entries[] = {
 
 void __weak arch_handle_alternative(unsigned short feature, struct special_alt *alt)
 {
-}
-
-static void reloc_to_sec_off(struct reloc *reloc, struct section **sec,
-			     unsigned long *off)
-{
-	*sec = reloc->sym->sec;
-	*off = reloc->sym->offset + reloc->addend;
 }
 
 static int get_alt_entry(struct elf *elf, struct special_entry *entry,
@@ -87,9 +77,8 @@ static int get_alt_entry(struct elf *elf, struct special_entry *entry,
 	if (entry->feature) {
 		unsigned short feature;
 
-		feature = bswap_if_needed(*(unsigned short *)(sec->data->d_buf +
-							      offset +
-							      entry->feature));
+		feature = *(unsigned short *)(sec->data->d_buf + offset +
+					      entry->feature);
 		arch_handle_alternative(feature, alt);
 	}
 
@@ -98,8 +87,14 @@ static int get_alt_entry(struct elf *elf, struct special_entry *entry,
 		WARN_FUNC("can't find orig reloc", sec, offset + entry->orig);
 		return -1;
 	}
+	if (orig_reloc->sym->type != STT_SECTION) {
+		WARN_FUNC("don't know how to handle non-section reloc symbol %s",
+			   sec, offset + entry->orig, orig_reloc->sym->name);
+		return -1;
+	}
 
-	reloc_to_sec_off(orig_reloc, &alt->orig_sec, &alt->orig_off);
+	alt->orig_sec = orig_reloc->sym->sec;
+	alt->orig_off = orig_reloc->addend;
 
 	if (!entry->group || alt->new_len) {
 		new_reloc = find_reloc_by_dest(elf, sec, offset + entry->new);
@@ -109,31 +104,12 @@ static int get_alt_entry(struct elf *elf, struct special_entry *entry,
 			return -1;
 		}
 
-		/*
-		 * Skip retpoline .altinstr_replacement... we already rewrite the
-		 * instructions for retpolines anyway, see arch_is_retpoline()
-		 * usage in add_{call,jump}_destinations().
-		 */
-		if (arch_is_retpoline(new_reloc->sym))
-			return 1;
-
-		reloc_to_sec_off(new_reloc, &alt->new_sec, &alt->new_off);
+		alt->new_sec = new_reloc->sym->sec;
+		alt->new_off = (unsigned int)new_reloc->addend;
 
 		/* _ASM_EXTABLE_EX hack */
 		if (alt->new_off >= 0x7ffffff0)
 			alt->new_off -= 0x7ffffff0;
-	}
-
-	if (entry->key) {
-		struct reloc *key_reloc;
-
-		key_reloc = find_reloc_by_dest(elf, sec, offset + entry->key);
-		if (!key_reloc) {
-			WARN_FUNC("can't find key reloc",
-				  sec, offset + entry->key);
-			return -1;
-		}
-		alt->key_addend = key_reloc->addend;
 	}
 
 	return 0;
@@ -159,13 +135,13 @@ int special_get_alts(struct elf *elf, struct list_head *alts)
 		if (!sec)
 			continue;
 
-		if (sec->sh.sh_size % entry->size != 0) {
+		if (sec->len % entry->size != 0) {
 			WARN("%s size not a multiple of %d",
 			     sec->name, entry->size);
 			return -1;
 		}
 
-		nr_entries = sec->sh.sh_size / entry->size;
+		nr_entries = sec->len / entry->size;
 
 		for (idx = 0; idx < nr_entries; idx++) {
 			alt = malloc(sizeof(*alt));
@@ -176,9 +152,7 @@ int special_get_alts(struct elf *elf, struct list_head *alts)
 			memset(alt, 0, sizeof(*alt));
 
 			ret = get_alt_entry(elf, entry, sec, idx, alt);
-			if (ret > 0)
-				continue;
-			if (ret < 0)
+			if (ret)
 				return ret;
 
 			list_add_tail(&alt->list, alts);

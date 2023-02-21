@@ -41,6 +41,7 @@
 
 #include <trace/events/neigh.h>
 
+#define DEBUG
 #define NEIGH_DEBUG 1
 #define neigh_dbg(level, fmt, ...)		\
 do {						\
@@ -131,9 +132,6 @@ static void neigh_update_gc_list(struct neighbour *n)
 	write_lock_bh(&n->tbl->lock);
 	write_lock(&n->lock);
 
-	if (n->dead)
-		goto out;
-
 	/* remove from the gc list if new state is permanent or if neighbor
 	 * is externally learned; otherwise entry should be on the gc list
 	 */
@@ -150,7 +148,6 @@ static void neigh_update_gc_list(struct neighbour *n)
 		atomic_inc(&n->tbl->gc_entries);
 	}
 
-out:
 	write_unlock(&n->lock);
 	write_unlock_bh(&n->tbl->lock);
 }
@@ -238,7 +235,6 @@ static int neigh_forced_gc(struct neigh_table *tbl)
 
 			write_lock(&n->lock);
 			if ((n->nud_state == NUD_FAILED) ||
-			    (n->nud_state == NUD_NOARP) ||
 			    (tbl->is_multicast &&
 			     tbl->is_multicast(n->primary_key)) ||
 			    time_after(tref, n->updated))
@@ -741,10 +737,12 @@ struct pneigh_entry * pneigh_lookup(struct neigh_table *tbl,
 	write_pnet(&n->net, net);
 	memcpy(n->key, pkey, key_len);
 	n->dev = dev;
-	dev_hold(dev);
+	if (dev)
+		dev_hold(dev);
 
 	if (tbl->pconstructor && tbl->pconstructor(n)) {
-		dev_put(dev);
+		if (dev)
+			dev_put(dev);
 		kfree(n);
 		n = NULL;
 		goto out;
@@ -776,7 +774,8 @@ int pneigh_delete(struct neigh_table *tbl, struct net *net, const void *pkey,
 			write_unlock_bh(&tbl->lock);
 			if (tbl->pdestructor)
 				tbl->pdestructor(n);
-			dev_put(n->dev);
+			if (n->dev)
+				dev_put(n->dev);
 			kfree(n);
 			return 0;
 		}
@@ -809,7 +808,8 @@ static int pneigh_ifdown_and_unlock(struct neigh_table *tbl,
 		n->next = NULL;
 		if (tbl->pdestructor)
 			tbl->pdestructor(n);
-		dev_put(n->dev);
+		if (n->dev)
+			dev_put(n->dev);
 		kfree(n);
 	}
 	return -ENOENT;
@@ -1245,14 +1245,13 @@ static int __neigh_update(struct neighbour *neigh, const u8 *lladdr,
 	old    = neigh->nud_state;
 	err    = -EPERM;
 
-	if (neigh->dead) {
-		NL_SET_ERR_MSG(extack, "Neighbor entry is now dead");
-		new = old;
-		goto out;
-	}
 	if (!(flags & NEIGH_UPDATE_F_ADMIN) &&
 	    (old & (NUD_NOARP | NUD_PERMANENT)))
 		goto out;
+	if (neigh->dead) {
+		NL_SET_ERR_MSG(extack, "Neighbor entry is now dead");
+		goto out;
+	}
 
 	ext_learn_change = neigh_update_ext_learned(neigh, flags, &notify);
 
@@ -1380,7 +1379,7 @@ static int __neigh_update(struct neighbour *neigh, const u8 *lladdr,
 			 * we can reinject the packet there.
 			 */
 			n2 = NULL;
-			if (dst && dst->obsolete != DST_OBSOLETE_DEAD) {
+			if (dst) {
 				n2 = dst_neigh_lookup_skb(dst, skb);
 				if (n2)
 					n1 = n2;
@@ -1570,8 +1569,10 @@ static void neigh_proxy_process(struct timer_list *t)
 void pneigh_enqueue(struct neigh_table *tbl, struct neigh_parms *p,
 		    struct sk_buff *skb)
 {
-	unsigned long sched_next = jiffies +
-			prandom_u32_max(NEIGH_VAR(p, PROXY_DELAY));
+	unsigned long now = jiffies;
+
+	unsigned long sched_next = now + (prandom_u32() %
+					  NEIGH_VAR(p, PROXY_DELAY));
 
 	if (tbl->proxy_queue.qlen > NEIGH_VAR(p, PROXY_QLEN)) {
 		kfree_skb(skb);
@@ -1658,7 +1659,8 @@ void neigh_parms_release(struct neigh_table *tbl, struct neigh_parms *parms)
 	list_del(&parms->list);
 	parms->dead = 1;
 	write_unlock_bh(&tbl->lock);
-	dev_put(parms->dev);
+	if (parms->dev)
+		dev_put(parms->dev);
 	call_rcu(&parms->rcu_head, neigh_rcu_free_parms);
 }
 EXPORT_SYMBOL(neigh_parms_release);
@@ -2528,13 +2530,6 @@ static bool neigh_master_filtered(struct net_device *dev, int master_idx)
 		return false;
 
 	master = dev ? netdev_master_upper_dev_get(dev) : NULL;
-
-	/* 0 is already used to denote NDA_MASTER wasn't passed, therefore need another
-	 * invalid value for ifindex to denote "no master".
-	 */
-	if (master_idx == -1)
-		return !!master;
-
 	if (!master || master->ifindex != master_idx)
 		return true;
 
@@ -3144,7 +3139,7 @@ static struct pneigh_entry *pneigh_get_first(struct seq_file *seq)
 	struct net *net = seq_file_net(seq);
 	struct neigh_table *tbl = state->tbl;
 	struct pneigh_entry *pn = NULL;
-	int bucket;
+	int bucket = state->bucket;
 
 	state->flags |= NEIGH_SEQ_IS_PNEIGH;
 	for (bucket = 0; bucket <= PNEIGH_HASHMASK; bucket++) {
@@ -3317,13 +3312,12 @@ static int neigh_stat_seq_show(struct seq_file *seq, void *v)
 	struct neigh_statistics *st = v;
 
 	if (v == SEQ_START_TOKEN) {
-		seq_puts(seq, "entries  allocs   destroys hash_grows lookups  hits     res_failed rcv_probes_mcast rcv_probes_ucast periodic_gc_runs forced_gc_runs unresolved_discards table_fulls\n");
+		seq_printf(seq, "entries  allocs destroys hash_grows  lookups hits  res_failed  rcv_probes_mcast rcv_probes_ucast  periodic_gc_runs forced_gc_runs unresolved_discards table_fulls\n");
 		return 0;
 	}
 
-	seq_printf(seq, "%08x %08lx %08lx %08lx   %08lx %08lx %08lx   "
-			"%08lx         %08lx         %08lx         "
-			"%08lx       %08lx            %08lx\n",
+	seq_printf(seq, "%08x  %08lx %08lx %08lx  %08lx %08lx  %08lx  "
+			"%08lx %08lx  %08lx %08lx %08lx %08lx\n",
 		   atomic_read(&tbl->entries),
 
 		   st->allocs,

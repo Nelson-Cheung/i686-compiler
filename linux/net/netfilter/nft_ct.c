@@ -27,8 +27,8 @@ struct nft_ct {
 	enum nft_ct_keys	key:8;
 	enum ip_conntrack_dir	dir:8;
 	union {
-		u8		dreg;
-		u8		sreg;
+		enum nft_registers	dreg:8;
+		enum nft_registers	sreg:8;
 	};
 };
 
@@ -41,7 +41,6 @@ struct nft_ct_helper_obj  {
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 static DEFINE_PER_CPU(struct nf_conn *, nft_ct_pcpu_template);
 static unsigned int nft_ct_pcpu_template_refcnt __read_mostly;
-static DEFINE_MUTEX(nft_ct_pcpu_mutex);
 #endif
 
 static u64 nft_ct_get_eval_counter(const struct nf_conn_counter *c,
@@ -499,8 +498,9 @@ static int nft_ct_get_init(const struct nft_ctx *ctx,
 		}
 	}
 
-	err = nft_parse_register_store(ctx, tb[NFTA_CT_DREG], &priv->dreg, NULL,
-				       NFT_DATA_VALUE, len);
+	priv->dreg = nft_parse_register(tb[NFTA_CT_DREG]);
+	err = nft_validate_register_store(ctx, priv->dreg, NULL,
+					  NFT_DATA_VALUE, len);
 	if (err < 0)
 		return err;
 
@@ -526,11 +526,8 @@ static void __nft_ct_set_destroy(const struct nft_ctx *ctx, struct nft_ct *priv)
 #endif
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	case NFT_CT_ZONE:
-		mutex_lock(&nft_ct_pcpu_mutex);
 		if (--nft_ct_pcpu_template_refcnt == 0)
 			nft_ct_tmpl_put_pcpu();
-		mutex_unlock(&nft_ct_pcpu_mutex);
-		break;
 #endif
 	default:
 		break;
@@ -567,13 +564,9 @@ static int nft_ct_set_init(const struct nft_ctx *ctx,
 #endif
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	case NFT_CT_ZONE:
-		mutex_lock(&nft_ct_pcpu_mutex);
-		if (!nft_ct_tmpl_alloc_pcpu()) {
-			mutex_unlock(&nft_ct_pcpu_mutex);
+		if (!nft_ct_tmpl_alloc_pcpu())
 			return -ENOMEM;
-		}
 		nft_ct_pcpu_template_refcnt++;
-		mutex_unlock(&nft_ct_pcpu_mutex);
 		len = sizeof(u16);
 		break;
 #endif
@@ -607,7 +600,8 @@ static int nft_ct_set_init(const struct nft_ctx *ctx,
 		}
 	}
 
-	err = nft_parse_register_load(tb[NFTA_CT_SREG], &priv->sreg, len);
+	priv->sreg = nft_parse_register(tb[NFTA_CT_SREG]);
+	err = nft_validate_register_load(priv->sreg, len);
 	if (err < 0)
 		goto err1;
 
@@ -994,7 +988,7 @@ static int nft_ct_helper_obj_init(const struct nft_ctx *ctx,
 	if (!priv->l4proto)
 		return -ENOENT;
 
-	nla_strscpy(name, tb[NFTA_CT_HELPER_NAME], sizeof(name));
+	nla_strlcpy(name, tb[NFTA_CT_HELPER_NAME], sizeof(name));
 
 	if (tb[NFTA_CT_HELPER_L3PROTO])
 		family = ntohs(nla_get_be16(tb[NFTA_CT_HELPER_L3PROTO]));
@@ -1224,7 +1218,7 @@ static void nft_ct_expect_obj_eval(struct nft_object *obj,
 	struct nf_conn *ct;
 
 	ct = nf_ct_get(pkt->skb, &ctinfo);
-	if (!ct || nf_ct_is_confirmed(ct) || nf_ct_is_template(ct)) {
+	if (!ct || ctinfo == IP_CT_UNTRACKED) {
 		regs->verdict.code = NFT_BREAK;
 		return;
 	}

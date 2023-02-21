@@ -780,7 +780,7 @@ static ssize_t mtk_btcvsd_snd_write(struct mtk_btcvsd_snd *bt,
 				    char __user *buf,
 				    size_t count)
 {
-	int written_size = count, avail, cur_write_idx, write_size, cont;
+	int written_size = count, avail = 0, cur_write_idx, write_size, cont;
 	unsigned int cur_buf_ofs = 0;
 	unsigned long flags;
 	unsigned int packet_size = bt->tx->packet_size;
@@ -808,7 +808,7 @@ static ssize_t mtk_btcvsd_snd_write(struct mtk_btcvsd_snd *bt,
 		spin_unlock_irqrestore(&bt->tx_lock, flags);
 
 		if (!avail) {
-			int ret = wait_for_bt_irq(bt, bt->tx);
+			int ret = wait_for_bt_irq(bt, bt->rx);
 
 			if (ret)
 				return written_size;
@@ -1281,7 +1281,7 @@ static const struct snd_soc_component_driver mtk_btcvsd_snd_platform = {
 
 static int mtk_btcvsd_snd_probe(struct platform_device *pdev)
 {
-	int ret;
+	int ret = 0;
 	int irq_id;
 	u32 offset[5] = {0, 0, 0, 0, 0};
 	struct mtk_btcvsd_snd *btcvsd;
@@ -1337,8 +1337,7 @@ static int mtk_btcvsd_snd_probe(struct platform_device *pdev)
 	btcvsd->bt_sram_bank2_base = of_iomap(dev->of_node, 1);
 	if (!btcvsd->bt_sram_bank2_base) {
 		dev_err(dev, "iomap bt_sram_bank2_base fail\n");
-		ret = -EIO;
-		goto unmap_pkv_err;
+		return -EIO;
 	}
 
 	btcvsd->infra = syscon_regmap_lookup_by_phandle(dev->of_node,
@@ -1346,8 +1345,7 @@ static int mtk_btcvsd_snd_probe(struct platform_device *pdev)
 	if (IS_ERR(btcvsd->infra)) {
 		dev_err(dev, "cannot find infra controller: %ld\n",
 			PTR_ERR(btcvsd->infra));
-		ret = PTR_ERR(btcvsd->infra);
-		goto unmap_bank2_err;
+		return PTR_ERR(btcvsd->infra);
 	}
 
 	/* get offset */
@@ -1356,7 +1354,7 @@ static int mtk_btcvsd_snd_probe(struct platform_device *pdev)
 					 ARRAY_SIZE(offset));
 	if (ret) {
 		dev_warn(dev, "%s(), get offset fail, ret %d\n", __func__, ret);
-		goto unmap_bank2_err;
+		return ret;
 	}
 	btcvsd->infra_misc_offset = offset[0];
 	btcvsd->conn_bt_cvsd_mask = offset[1];
@@ -1375,18 +1373,8 @@ static int mtk_btcvsd_snd_probe(struct platform_device *pdev)
 	mtk_btcvsd_snd_set_state(btcvsd, btcvsd->tx, BT_SCO_STATE_IDLE);
 	mtk_btcvsd_snd_set_state(btcvsd, btcvsd->rx, BT_SCO_STATE_IDLE);
 
-	ret = devm_snd_soc_register_component(dev, &mtk_btcvsd_snd_platform,
-					      NULL, 0);
-	if (ret)
-		goto unmap_bank2_err;
-
-	return 0;
-
-unmap_bank2_err:
-	iounmap(btcvsd->bt_sram_bank2_base);
-unmap_pkv_err:
-	iounmap(btcvsd->bt_pkv_base);
-	return ret;
+	return devm_snd_soc_register_component(dev, &mtk_btcvsd_snd_platform,
+					       NULL, 0);
 }
 
 static int mtk_btcvsd_snd_remove(struct platform_device *pdev)

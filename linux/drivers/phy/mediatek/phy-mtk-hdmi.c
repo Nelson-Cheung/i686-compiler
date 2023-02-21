@@ -84,9 +84,8 @@ mtk_hdmi_phy_dev_get_ops(const struct mtk_hdmi_phy *hdmi_phy)
 	    hdmi_phy->conf->hdmi_phy_disable_tmds)
 		return &mtk_hdmi_phy_dev_ops;
 
-	if (hdmi_phy)
-		dev_err(hdmi_phy->dev, "Failed to get dev ops of phy\n");
-	return NULL;
+	dev_err(hdmi_phy->dev, "Failed to get dev ops of phy\n");
+		return NULL;
 }
 
 static void mtk_hdmi_phy_clk_get_data(struct mtk_hdmi_phy *hdmi_phy,
@@ -100,6 +99,7 @@ static int mtk_hdmi_phy_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct mtk_hdmi_phy *hdmi_phy;
+	struct resource *mem;
 	struct clk *ref_clk;
 	const char *ref_clk_name;
 	struct clk_init_data clk_init = {
@@ -115,9 +115,13 @@ static int mtk_hdmi_phy_probe(struct platform_device *pdev)
 	if (!hdmi_phy)
 		return -ENOMEM;
 
-	hdmi_phy->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(hdmi_phy->regs))
-		return PTR_ERR(hdmi_phy->regs);
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	hdmi_phy->regs = devm_ioremap_resource(dev, mem);
+	if (IS_ERR(hdmi_phy->regs)) {
+		ret = PTR_ERR(hdmi_phy->regs);
+		dev_err(dev, "Failed to get memory resource: %d\n", ret);
+		return ret;
+	}
 
 	ref_clk = devm_clk_get(dev, "pll_ref");
 	if (IS_ERR(ref_clk)) {
@@ -196,9 +200,8 @@ static const struct of_device_id mtk_hdmi_phy_match[] = {
 	},
 	{},
 };
-MODULE_DEVICE_TABLE(of, mtk_hdmi_phy_match);
 
-static struct platform_driver mtk_hdmi_phy_driver = {
+struct platform_driver mtk_hdmi_phy_driver = {
 	.probe = mtk_hdmi_phy_probe,
 	.driver = {
 		.name = "mediatek-hdmi-phy",

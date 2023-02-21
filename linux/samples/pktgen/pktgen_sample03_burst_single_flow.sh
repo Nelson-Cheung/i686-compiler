@@ -42,15 +42,18 @@ if [ -n "$DST_PORT" ]; then
     validate_ports $UDP_DST_MIN $UDP_DST_MAX
 fi
 
+# Base Config
+DELAY="0"  # Zero means max speed
+
 # General cleanup everything since last run
-[ -z "$APPEND" ] && pg_ctrl "reset"
+pg_ctrl "reset"
 
 # Threads are specified with parameter -t value in $THREADS
 for ((thread = $F_THREAD; thread <= $L_THREAD; thread++)); do
     dev=${DEV}@${thread}
 
     # Add remove all other devices and add_device $dev to thread
-    [ -z "$APPEND" ] && pg_thread $thread "rem_device_all"
+    pg_thread $thread "rem_device_all"
     pg_thread $thread "add_device" $dev
 
     # Base config
@@ -73,8 +76,6 @@ for ((thread = $F_THREAD; thread <= $L_THREAD; thread++)); do
 	pg_set $dev "udp_dst_max $UDP_DST_MAX"
     fi
 
-    [ ! -z "$UDP_CSUM" ] && pg_set $dev "flag UDPCSUM"
-
     # Setup burst, for easy testing -b 0 disable bursting
     # (internally in pktgen default and minimum burst=1)
     if [[ ${BURST} -ne 0 ]]; then
@@ -85,7 +86,7 @@ for ((thread = $F_THREAD; thread <= $L_THREAD; thread++)); do
 done
 
 # Run if user hits control-c
-function print_result() {
+function control_c() {
     # Print results
     for ((thread = $F_THREAD; thread <= $L_THREAD; thread++)); do
 	dev=${DEV}@${thread}
@@ -94,13 +95,7 @@ function print_result() {
     done
 }
 # trap keyboard interrupt (Ctrl-C)
-trap true SIGINT
+trap control_c SIGINT
 
-if [ -z "$APPEND" ]; then
-    echo "Running... ctrl^C to stop" >&2
-    pg_ctrl "start"
-
-    print_result
-else
-    echo "Append mode: config done. Do more or use 'pg_ctrl start' to run"
-fi
+echo "Running... ctrl^C to stop" >&2
+pg_ctrl "start"

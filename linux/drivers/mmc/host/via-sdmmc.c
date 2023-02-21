@@ -491,7 +491,7 @@ static void via_sdc_preparedata(struct via_crdr_mmc_host *host,
 
 	count = dma_map_sg(mmc_dev(host->mmc), data->sg, data->sg_len,
 		((data->flags & MMC_DATA_READ) ?
-		DMA_FROM_DEVICE : DMA_TO_DEVICE));
+		PCI_DMA_FROMDEVICE : PCI_DMA_TODEVICE));
 	BUG_ON(count != 1);
 
 	via_set_ddma(host, sg_dma_address(data->sg), sg_dma_len(data->sg),
@@ -638,7 +638,7 @@ static void via_sdc_finish_data(struct via_crdr_mmc_host *host)
 
 	dma_unmap_sg(mmc_dev(host->mmc), data->sg, data->sg_len,
 		((data->flags & MMC_DATA_READ) ?
-		DMA_FROM_DEVICE : DMA_TO_DEVICE));
+		PCI_DMA_FROMDEVICE : PCI_DMA_TODEVICE));
 
 	if (data->stop)
 		via_sdc_send_command(host, data->stop);
@@ -857,9 +857,6 @@ static void via_sdc_data_isr(struct via_crdr_mmc_host *host, u16 intmask)
 {
 	BUG_ON(intmask == 0);
 
-	if (!host->data)
-		return;
-
 	if (intmask & VIA_CRDR_SDSTS_DT)
 		host->data->error = -ETIMEDOUT;
 	else if (intmask & (VIA_CRDR_SDSTS_RC | VIA_CRDR_SDSTS_WC))
@@ -962,11 +959,13 @@ static void via_sdc_timeout(struct timer_list *t)
 	spin_unlock_irqrestore(&sdhost->lock, flags);
 }
 
-static void via_sdc_tasklet_finish(struct tasklet_struct *t)
+static void via_sdc_tasklet_finish(unsigned long param)
 {
-	struct via_crdr_mmc_host *host = from_tasklet(host, t, finish_tasklet);
+	struct via_crdr_mmc_host *host;
 	unsigned long flags;
 	struct mmc_request *mrq;
+
+	host = (struct via_crdr_mmc_host *)param;
 
 	spin_lock_irqsave(&host->lock, flags);
 
@@ -1051,7 +1050,8 @@ static void via_init_mmc_host(struct via_crdr_mmc_host *host)
 
 	INIT_WORK(&host->carddet_work, via_sdc_card_detect);
 
-	tasklet_setup(&host->finish_tasklet, via_sdc_tasklet_finish);
+	tasklet_init(&host->finish_tasklet, via_sdc_tasklet_finish,
+		     (unsigned long)host);
 
 	addrbase = host->sdhc_mmiobase;
 	writel(0x0, addrbase + VIA_CRDR_SDINTMASK);
@@ -1274,6 +1274,7 @@ static int __maybe_unused via_sd_suspend(struct device *dev)
 static int __maybe_unused via_sd_resume(struct device *dev)
 {
 	struct via_crdr_mmc_host *sdhost;
+	int ret = 0;
 	u8 gatt;
 
 	sdhost = dev_get_drvdata(dev);
@@ -1294,7 +1295,7 @@ static int __maybe_unused via_sd_resume(struct device *dev)
 	via_restore_pcictrlreg(sdhost);
 	via_init_sdc_pm(sdhost);
 
-	return 0;
+	return ret;
 }
 
 static SIMPLE_DEV_PM_OPS(via_sd_pm_ops, via_sd_suspend, via_sd_resume);

@@ -63,8 +63,8 @@ xbitmap_init(
 static int
 xbitmap_range_cmp(
 	void			*priv,
-	const struct list_head	*a,
-	const struct list_head	*b)
+	struct list_head	*a,
+	struct list_head	*b)
 {
 	struct xbitmap_range	*ap;
 	struct xbitmap_range	*bp;
@@ -260,7 +260,7 @@ xbitmap_set_btcur_path(
 		xfs_btree_get_block(cur, i, &bp);
 		if (!bp)
 			continue;
-		fsb = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
+		fsb = XFS_DADDR_TO_FSB(cur->bc_mp, bp->b_bn);
 		error = xbitmap_set(bitmap, fsb, 1);
 		if (error)
 			return error;
@@ -284,7 +284,7 @@ xbitmap_collect_btblock(
 	if (!bp)
 		return 0;
 
-	fsbno = XFS_DADDR_TO_FSB(cur->bc_mp, xfs_buf_daddr(bp));
+	fsbno = XFS_DADDR_TO_FSB(cur->bc_mp, bp->b_bn);
 	return xbitmap_set(bitmap, fsbno, 1);
 }
 

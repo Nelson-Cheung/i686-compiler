@@ -17,6 +17,9 @@
  *    Copyright (C) 2001-2014 Helge Deller <deller@gmx.de>
  *    Copyright (C) 2002 Randolph Chung <tausq with parisc-linux.org>
  */
+
+#include <stdarg.h>
+
 #include <linux/elf.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -197,7 +200,7 @@ copy_thread(unsigned long clone_flags, unsigned long usp,
 	extern void * const ret_from_kernel_thread;
 	extern void * const child_return;
 
-	if (unlikely(p->flags & (PF_KTHREAD | PF_IO_WORKER))) {
+	if (unlikely(p->flags & PF_KTHREAD)) {
 		/* kernel thread */
 		memset(cregs, 0, sizeof(struct pt_regs));
 		if (!usp) /* idle thread */
@@ -246,7 +249,7 @@ get_wchan(struct task_struct *p)
 	unsigned long ip;
 	int count = 0;
 
-	if (!p || p == current || task_is_running(p))
+	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
 
 	/*
@@ -257,8 +260,6 @@ get_wchan(struct task_struct *p)
 	do {
 		if (unwind_once(&info) < 0)
 			return 0;
-		if (task_is_running(p))
-                        return 0;
 		ip = info.ip;
 		if (!in_sched_functions(ip))
 			return ip;

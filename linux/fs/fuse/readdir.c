@@ -200,17 +200,14 @@ retry:
 	if (!d_in_lookup(dentry)) {
 		struct fuse_inode *fi;
 		inode = d_inode(dentry);
-		if (inode && get_node_id(inode) != o->nodeid)
-			inode = NULL;
 		if (!inode ||
-		    fuse_stale_inode(inode, o->generation, &o->attr)) {
-			if (inode)
-				fuse_make_bad(inode);
+		    get_node_id(inode) != o->nodeid ||
+		    ((o->attr.mode ^ inode->i_mode) & S_IFMT)) {
 			d_invalidate(dentry);
 			dput(dentry);
 			goto retry;
 		}
-		if (fuse_is_bad(inode)) {
+		if (is_bad_inode(inode)) {
 			dput(dentry);
 			return -EIO;
 		}
@@ -571,7 +568,7 @@ int fuse_readdir(struct file *file, struct dir_context *ctx)
 	struct inode *inode = file_inode(file);
 	int err;
 
-	if (fuse_is_bad(inode))
+	if (is_bad_inode(inode))
 		return -EIO;
 
 	mutex_lock(&ff->readdir.lock);

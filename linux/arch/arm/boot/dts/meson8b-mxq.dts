@@ -27,14 +27,17 @@
 		reg = <0x40000000 0x40000000>;
 	};
 
+	iio-hwmon {
+		compatible = "iio-hwmon";
+		io-channels = <&saradc 8>;
+	};
+
 	vcck: regulator-vcck {
 		compatible = "pwm-regulator";
 
 		regulator-name = "VCCK";
 		regulator-min-microvolt = <860000>;
 		regulator-max-microvolt = <1140000>;
-
-		pwm-supply = <&vcc_5v>;
 
 		pwms = <&pwm_cd 0 1148 0>;
 		pwm-dutycycle-range = <100 0>;
@@ -81,7 +84,7 @@
 		regulator-min-microvolt = <860000>;
 		regulator-max-microvolt = <1140000>;
 
-		pwm-supply = <&vcc_5v>;
+		vin-supply = <&vcc_5v>;
 
 		pwms = <&pwm_cd 1 1148 0>;
 		pwm-dutycycle-range = <100 0>;

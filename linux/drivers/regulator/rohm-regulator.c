@@ -22,26 +22,13 @@ static int set_dvs_level(const struct regulator_desc *desc,
 			return ret;
 		return 0;
 	}
-	/* If voltage is set to 0 => disable */
+
 	if (uv == 0) {
 		if (omask)
 			return regmap_update_bits(regmap, oreg, omask, 0);
 	}
-	/* Some setups don't allow setting own voltage but do allow enabling */
-	if (!mask) {
-		if (omask)
-			return regmap_update_bits(regmap, oreg, omask, omask);
-
-		return -EINVAL;
-	}
 	for (i = 0; i < desc->n_voltages; i++) {
-		/* NOTE to next hacker - Does not support pickable ranges */
-		if (desc->linear_range_selectors)
-			return -EINVAL;
-		if (desc->n_linear_ranges)
-			ret = regulator_desc_list_voltage_linear_range(desc, i);
-		else
-			ret = regulator_desc_list_voltage_linear(desc, i);
+		ret = regulator_desc_list_voltage_linear_range(desc, i);
 		if (ret < 0)
 			continue;
 		if (ret == uv) {
@@ -65,12 +52,9 @@ int rohm_regulator_set_dvs_levels(const struct rohm_dvs_config *dvs,
 	char *prop;
 	unsigned int reg, mask, omask, oreg = desc->enable_reg;
 
-	for (i = 0; i < ROHM_DVS_LEVEL_VALID_AMOUNT && !ret; i++) {
-		int bit;
-
-		bit = BIT(i);
-		if (dvs->level_map & bit) {
-			switch (bit) {
+	for (i = 0; i < ROHM_DVS_LEVEL_MAX && !ret; i++) {
+		if (dvs->level_map & (1 << i)) {
+			switch (i + 1) {
 			case ROHM_DVS_LEVEL_RUN:
 				prop = "rohm,dvs-run-voltage";
 				reg = dvs->run_reg;
@@ -94,12 +78,6 @@ int rohm_regulator_set_dvs_levels(const struct rohm_dvs_config *dvs,
 				reg = dvs->lpsr_reg;
 				mask = dvs->lpsr_mask;
 				omask = dvs->lpsr_on_mask;
-				break;
-			case ROHM_DVS_LEVEL_SNVS:
-				prop = "rohm,dvs-snvs-voltage";
-				reg = dvs->snvs_reg;
-				mask = dvs->snvs_mask;
-				omask = dvs->snvs_on_mask;
 				break;
 			default:
 				return -EINVAL;

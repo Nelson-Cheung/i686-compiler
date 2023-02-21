@@ -71,7 +71,7 @@ static struct qcom_scm_wb_entry qcom_scm_wb[] = {
 	{ .flag = QCOM_SCM_FLAG_WARMBOOT_CPU3 },
 };
 
-static const char * const qcom_scm_convention_names[] = {
+static const char *qcom_scm_convention_names[] = {
 	[SMC_CONVENTION_UNKNOWN] = "unknown",
 	[SMC_CONVENTION_ARM_32] = "smc arm 32",
 	[SMC_CONVENTION_ARM_64] = "smc arm 64",
@@ -113,10 +113,14 @@ static void qcom_scm_clk_disable(void)
 	clk_disable_unprepare(__scm->bus_clk);
 }
 
-enum qcom_scm_convention qcom_scm_convention = SMC_CONVENTION_UNKNOWN;
-static DEFINE_SPINLOCK(scm_query_lock);
+static int __qcom_scm_is_call_available(struct device *dev, u32 svc_id,
+					u32 cmd_id);
 
-static enum qcom_scm_convention __get_convention(void)
+enum qcom_scm_convention qcom_scm_convention;
+static bool has_queried __read_mostly;
+static DEFINE_SPINLOCK(query_lock);
+
+static void __query_convention(void)
 {
 	unsigned long flags;
 	struct qcom_scm_desc desc = {
@@ -129,50 +133,36 @@ static enum qcom_scm_convention __get_convention(void)
 		.owner = ARM_SMCCC_OWNER_SIP,
 	};
 	struct qcom_scm_res res;
-	enum qcom_scm_convention probed_convention;
 	int ret;
-	bool forced = false;
 
-	if (likely(qcom_scm_convention != SMC_CONVENTION_UNKNOWN))
-		return qcom_scm_convention;
+	spin_lock_irqsave(&query_lock, flags);
+	if (has_queried)
+		goto out;
 
-	/*
-	 * Device isn't required as there is only one argument - no device
-	 * needed to dma_map_single to secure world
-	 */
-	probed_convention = SMC_CONVENTION_ARM_64;
-	ret = __scm_smc_call(NULL, &desc, probed_convention, &res, true);
+	qcom_scm_convention = SMC_CONVENTION_ARM_64;
+	// Device isn't required as there is only one argument - no device
+	// needed to dma_map_single to secure world
+	ret = scm_smc_call(NULL, &desc, &res, true);
 	if (!ret && res.result[0] == 1)
-		goto found;
+		goto out;
 
-	/*
-	 * Some SC7180 firmwares didn't implement the
-	 * QCOM_SCM_INFO_IS_CALL_AVAIL call, so we fallback to forcing ARM_64
-	 * calling conventions on these firmwares. Luckily we don't make any
-	 * early calls into the firmware on these SoCs so the device pointer
-	 * will be valid here to check if the compatible matches.
-	 */
-	if (of_device_is_compatible(__scm ? __scm->dev->of_node : NULL, "qcom,scm-sc7180")) {
-		forced = true;
-		goto found;
-	}
-
-	probed_convention = SMC_CONVENTION_ARM_32;
-	ret = __scm_smc_call(NULL, &desc, probed_convention, &res, true);
+	qcom_scm_convention = SMC_CONVENTION_ARM_32;
+	ret = scm_smc_call(NULL, &desc, &res, true);
 	if (!ret && res.result[0] == 1)
-		goto found;
+		goto out;
 
-	probed_convention = SMC_CONVENTION_LEGACY;
-found:
-	spin_lock_irqsave(&scm_query_lock, flags);
-	if (probed_convention != qcom_scm_convention) {
-		qcom_scm_convention = probed_convention;
-		pr_info("qcom_scm: convention: %s%s\n",
-			qcom_scm_convention_names[qcom_scm_convention],
-			forced ? " (forced)" : "");
-	}
-	spin_unlock_irqrestore(&scm_query_lock, flags);
+	qcom_scm_convention = SMC_CONVENTION_LEGACY;
+out:
+	has_queried = true;
+	spin_unlock_irqrestore(&query_lock, flags);
+	pr_info("qcom_scm: convention: %s\n",
+		qcom_scm_convention_names[qcom_scm_convention]);
+}
 
+static inline enum qcom_scm_convention __get_convention(void)
+{
+	if (unlikely(!has_queried))
+		__query_convention();
 	return qcom_scm_convention;
 }
 
@@ -229,8 +219,8 @@ static int qcom_scm_call_atomic(struct device *dev,
 	}
 }
 
-static bool __qcom_scm_is_call_available(struct device *dev, u32 svc_id,
-					 u32 cmd_id)
+static int __qcom_scm_is_call_available(struct device *dev, u32 svc_id,
+					u32 cmd_id)
 {
 	int ret;
 	struct qcom_scm_desc desc = {
@@ -257,7 +247,7 @@ static bool __qcom_scm_is_call_available(struct device *dev, u32 svc_id,
 
 	ret = qcom_scm_call(dev, &desc, &res);
 
-	return ret ? false : !!res.result[0];
+	return ret ? : res.result[0];
 }
 
 /**
@@ -331,7 +321,7 @@ int qcom_scm_set_cold_boot_addr(void *entry, const cpumask_t *cpus)
 		.owner = ARM_SMCCC_OWNER_SIP,
 	};
 
-	if (!cpus || cpumask_empty(cpus))
+	if (!cpus || (cpus && cpumask_empty(cpus)))
 		return -EINVAL;
 
 	for_each_cpu(cpu, cpus) {
@@ -595,8 +585,9 @@ bool qcom_scm_pas_supported(u32 peripheral)
 	};
 	struct qcom_scm_res res;
 
-	if (!__qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_PIL,
-					  QCOM_SCM_PIL_PAS_IS_SUPPORTED))
+	ret = __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_PIL,
+					   QCOM_SCM_PIL_PAS_IS_SUPPORTED);
+	if (ret <= 0)
 		return false;
 
 	ret = qcom_scm_call(__scm->dev, &desc, &res);
@@ -974,11 +965,8 @@ EXPORT_SYMBOL(qcom_scm_ice_available);
  * qcom_scm_ice_invalidate_key() - Invalidate an inline encryption key
  * @index: the keyslot to invalidate
  *
- * The UFSHCI and eMMC standards define a standard way to do this, but it
- * doesn't work on these SoCs; only this SCM call does.
- *
- * It is assumed that the SoC has only one ICE instance being used, as this SCM
- * call doesn't specify which ICE instance the keyslot belongs to.
+ * The UFSHCI standard defines a standard way to do this, but it doesn't work on
+ * these SoCs; only this SCM call does.
  *
  * Return: 0 on success; -errno on failure.
  */
@@ -1007,13 +995,10 @@ EXPORT_SYMBOL(qcom_scm_ice_invalidate_key);
  *		    units, e.g. 1 = 512 bytes, 8 = 4096 bytes, etc.
  *
  * Program a key into a keyslot of Qualcomm ICE (Inline Crypto Engine), where it
- * can then be used to encrypt/decrypt UFS or eMMC I/O requests inline.
+ * can then be used to encrypt/decrypt UFS I/O requests inline.
  *
- * The UFSHCI and eMMC standards define a standard way to do this, but it
- * doesn't work on these SoCs; only this SCM call does.
- *
- * It is assumed that the SoC has only one ICE instance being used, as this SCM
- * call doesn't specify which ICE instance the keyslot belongs to.
+ * The UFSHCI standard defines a standard way to do this, but it doesn't work on
+ * these SoCs; only this SCM call does.
  *
  * Return: 0 on success; -errno on failure.
  */
@@ -1069,18 +1054,17 @@ EXPORT_SYMBOL(qcom_scm_ice_set_key);
  */
 bool qcom_scm_hdcp_available(void)
 {
-	bool avail;
 	int ret = qcom_scm_clk_enable();
 
 	if (ret)
 		return ret;
 
-	avail = __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_HDCP,
+	ret = __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_HDCP,
 						QCOM_SCM_HDCP_INVOKE);
 
 	qcom_scm_clk_disable();
 
-	return avail;
+	return ret > 0;
 }
 EXPORT_SYMBOL(qcom_scm_hdcp_available);
 
@@ -1146,64 +1130,6 @@ int qcom_scm_qsmmu500_wait_safe_toggle(bool en)
 	return qcom_scm_call_atomic(__scm->dev, &desc, NULL);
 }
 EXPORT_SYMBOL(qcom_scm_qsmmu500_wait_safe_toggle);
-
-bool qcom_scm_lmh_dcvsh_available(void)
-{
-	return __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_LMH, QCOM_SCM_LMH_LIMIT_DCVSH);
-}
-EXPORT_SYMBOL(qcom_scm_lmh_dcvsh_available);
-
-int qcom_scm_lmh_profile_change(u32 profile_id)
-{
-	struct qcom_scm_desc desc = {
-		.svc = QCOM_SCM_SVC_LMH,
-		.cmd = QCOM_SCM_LMH_LIMIT_PROFILE_CHANGE,
-		.arginfo = QCOM_SCM_ARGS(1, QCOM_SCM_VAL),
-		.args[0] = profile_id,
-		.owner = ARM_SMCCC_OWNER_SIP,
-	};
-
-	return qcom_scm_call(__scm->dev, &desc, NULL);
-}
-EXPORT_SYMBOL(qcom_scm_lmh_profile_change);
-
-int qcom_scm_lmh_dcvsh(u32 payload_fn, u32 payload_reg, u32 payload_val,
-		       u64 limit_node, u32 node_id, u64 version)
-{
-	dma_addr_t payload_phys;
-	u32 *payload_buf;
-	int ret, payload_size = 5 * sizeof(u32);
-
-	struct qcom_scm_desc desc = {
-		.svc = QCOM_SCM_SVC_LMH,
-		.cmd = QCOM_SCM_LMH_LIMIT_DCVSH,
-		.arginfo = QCOM_SCM_ARGS(5, QCOM_SCM_RO, QCOM_SCM_VAL, QCOM_SCM_VAL,
-					QCOM_SCM_VAL, QCOM_SCM_VAL),
-		.args[1] = payload_size,
-		.args[2] = limit_node,
-		.args[3] = node_id,
-		.args[4] = version,
-		.owner = ARM_SMCCC_OWNER_SIP,
-	};
-
-	payload_buf = dma_alloc_coherent(__scm->dev, payload_size, &payload_phys, GFP_KERNEL);
-	if (!payload_buf)
-		return -ENOMEM;
-
-	payload_buf[0] = payload_fn;
-	payload_buf[1] = 0;
-	payload_buf[2] = payload_reg;
-	payload_buf[3] = 1;
-	payload_buf[4] = payload_val;
-
-	desc.args[0] = payload_phys;
-
-	ret = qcom_scm_call(__scm->dev, &desc, NULL);
-
-	dma_free_coherent(__scm->dev, payload_size, payload_buf, payload_phys);
-	return ret;
-}
-EXPORT_SYMBOL(qcom_scm_lmh_dcvsh);
 
 static int qcom_scm_find_dload_address(struct device *dev, u64 *addr)
 {
@@ -1310,7 +1236,7 @@ static int qcom_scm_probe(struct platform_device *pdev)
 	__scm = scm;
 	__scm->dev = &pdev->dev;
 
-	__get_convention();
+	__query_convention();
 
 	/*
 	 * If requested enable "download mode", from this point on warmboot
@@ -1339,9 +1265,6 @@ static const struct of_device_id qcom_scm_dt_match[] = {
 							     SCM_HAS_BUS_CLK)
 	},
 	{ .compatible = "qcom,scm-ipq4019" },
-	{ .compatible = "qcom,scm-mdm9607", .data = (void *)(SCM_HAS_CORE_CLK |
-							     SCM_HAS_IFACE_CLK |
-							     SCM_HAS_BUS_CLK) },
 	{ .compatible = "qcom,scm-msm8660", .data = (void *) SCM_HAS_CORE_CLK },
 	{ .compatible = "qcom,scm-msm8960", .data = (void *) SCM_HAS_CORE_CLK },
 	{ .compatible = "qcom,scm-msm8916", .data = (void *)(SCM_HAS_CORE_CLK |
@@ -1357,13 +1280,11 @@ static const struct of_device_id qcom_scm_dt_match[] = {
 	{ .compatible = "qcom,scm" },
 	{}
 };
-MODULE_DEVICE_TABLE(of, qcom_scm_dt_match);
 
 static struct platform_driver qcom_scm_driver = {
 	.driver = {
 		.name	= "qcom_scm",
 		.of_match_table = qcom_scm_dt_match,
-		.suppress_bind_attrs = true,
 	},
 	.probe = qcom_scm_probe,
 	.shutdown = qcom_scm_shutdown,
@@ -1374,6 +1295,3 @@ static int __init qcom_scm_init(void)
 	return platform_driver_register(&qcom_scm_driver);
 }
 subsys_initcall(qcom_scm_init);
-
-MODULE_DESCRIPTION("Qualcomm Technologies, Inc. SCM driver");
-MODULE_LICENSE("GPL v2");

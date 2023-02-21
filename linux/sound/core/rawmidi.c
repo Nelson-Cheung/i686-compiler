@@ -95,21 +95,11 @@ static inline unsigned short snd_rawmidi_file_flags(struct file *file)
 	}
 }
 
-static inline bool __snd_rawmidi_ready(struct snd_rawmidi_runtime *runtime)
-{
-	return runtime->avail >= runtime->avail_min;
-}
-
-static bool snd_rawmidi_ready(struct snd_rawmidi_substream *substream)
+static inline int snd_rawmidi_ready(struct snd_rawmidi_substream *substream)
 {
 	struct snd_rawmidi_runtime *runtime = substream->runtime;
-	unsigned long flags;
-	bool ready;
 
-	spin_lock_irqsave(&runtime->lock, flags);
-	ready = __snd_rawmidi_ready(runtime);
-	spin_unlock_irqrestore(&runtime->lock, flags);
-	return ready;
+	return runtime->avail >= runtime->avail_min;
 }
 
 static inline int snd_rawmidi_ready_append(struct snd_rawmidi_substream *substream,
@@ -680,11 +670,8 @@ static int resize_runtime_buffer(struct snd_rawmidi_runtime *runtime,
 				 bool is_input)
 {
 	char *newbuf, *oldbuf;
-	unsigned int framing = params->mode & SNDRV_RAWMIDI_MODE_FRAMING_MASK;
 
 	if (params->buffer_size < 32 || params->buffer_size > 1024L * 1024L)
-		return -EINVAL;
-	if (framing == SNDRV_RAWMIDI_MODE_FRAMING_TSTAMP && (params->buffer_size & 0x1f) != 0)
 		return -EINVAL;
 	if (params->avail_min < 1 || params->avail_min > params->buffer_size)
 		return -EINVAL;
@@ -723,24 +710,8 @@ EXPORT_SYMBOL(snd_rawmidi_output_params);
 int snd_rawmidi_input_params(struct snd_rawmidi_substream *substream,
 			     struct snd_rawmidi_params *params)
 {
-	unsigned int framing = params->mode & SNDRV_RAWMIDI_MODE_FRAMING_MASK;
-	unsigned int clock_type = params->mode & SNDRV_RAWMIDI_MODE_CLOCK_MASK;
-	int err;
-
-	if (framing == SNDRV_RAWMIDI_MODE_FRAMING_NONE && clock_type != SNDRV_RAWMIDI_MODE_CLOCK_NONE)
-		return -EINVAL;
-	else if (clock_type > SNDRV_RAWMIDI_MODE_CLOCK_MONOTONIC_RAW)
-		return -EINVAL;
-	if (framing > SNDRV_RAWMIDI_MODE_FRAMING_TSTAMP)
-		return -EINVAL;
 	snd_rawmidi_drain_input(substream);
-	err = resize_runtime_buffer(substream->runtime, params, true);
-	if (err < 0)
-		return err;
-
-	substream->framing = framing;
-	substream->clock_type = clock_type;
-	return 0;
+	return resize_runtime_buffer(substream->runtime, params, true);
 }
 EXPORT_SYMBOL(snd_rawmidi_input_params);
 
@@ -873,21 +844,12 @@ static long snd_rawmidi_ioctl(struct file *file, unsigned int cmd, unsigned long
 			return -EINVAL;
 		}
 	}
-	case SNDRV_RAWMIDI_IOCTL_USER_PVERSION:
-		if (get_user(rfile->user_pversion, (unsigned int __user *)arg))
-			return -EFAULT;
-		return 0;
-
 	case SNDRV_RAWMIDI_IOCTL_PARAMS:
 	{
 		struct snd_rawmidi_params params;
 
 		if (copy_from_user(&params, argp, sizeof(struct snd_rawmidi_params)))
 			return -EFAULT;
-		if (rfile->user_pversion < SNDRV_PROTOCOL_VERSION(2, 0, 2)) {
-			params.mode = 0;
-			memset(params.reserved, 0, sizeof(params.reserved));
-		}
 		switch (params.stream) {
 		case SNDRV_RAWMIDI_STREAM_OUTPUT:
 			if (rfile->output == NULL)
@@ -991,62 +953,6 @@ static int snd_rawmidi_control_ioctl(struct snd_card *card,
 	return -ENOIOCTLCMD;
 }
 
-static int receive_with_tstamp_framing(struct snd_rawmidi_substream *substream,
-			const unsigned char *buffer, int src_count, const struct timespec64 *tstamp)
-{
-	struct snd_rawmidi_runtime *runtime = substream->runtime;
-	struct snd_rawmidi_framing_tstamp *dest_ptr;
-	struct snd_rawmidi_framing_tstamp frame = { .tv_sec = tstamp->tv_sec, .tv_nsec = tstamp->tv_nsec };
-	int dest_frames = 0;
-	int orig_count = src_count;
-	int frame_size = sizeof(struct snd_rawmidi_framing_tstamp);
-
-	BUILD_BUG_ON(frame_size != 0x20);
-	if (snd_BUG_ON((runtime->hw_ptr & 0x1f) != 0))
-		return -EINVAL;
-
-	while (src_count > 0) {
-		if ((int)(runtime->buffer_size - runtime->avail) < frame_size) {
-			runtime->xruns += src_count;
-			break;
-		}
-		if (src_count >= SNDRV_RAWMIDI_FRAMING_DATA_LENGTH)
-			frame.length = SNDRV_RAWMIDI_FRAMING_DATA_LENGTH;
-		else {
-			frame.length = src_count;
-			memset(frame.data, 0, SNDRV_RAWMIDI_FRAMING_DATA_LENGTH);
-		}
-		memcpy(frame.data, buffer, frame.length);
-		buffer += frame.length;
-		src_count -= frame.length;
-		dest_ptr = (struct snd_rawmidi_framing_tstamp *) (runtime->buffer + runtime->hw_ptr);
-		*dest_ptr = frame;
-		runtime->avail += frame_size;
-		runtime->hw_ptr += frame_size;
-		runtime->hw_ptr %= runtime->buffer_size;
-		dest_frames++;
-	}
-	return orig_count - src_count;
-}
-
-static struct timespec64 get_framing_tstamp(struct snd_rawmidi_substream *substream)
-{
-	struct timespec64 ts64 = {0, 0};
-
-	switch (substream->clock_type) {
-	case SNDRV_RAWMIDI_MODE_CLOCK_MONOTONIC_RAW:
-		ktime_get_raw_ts64(&ts64);
-		break;
-	case SNDRV_RAWMIDI_MODE_CLOCK_MONOTONIC:
-		ktime_get_ts64(&ts64);
-		break;
-	case SNDRV_RAWMIDI_MODE_CLOCK_REALTIME:
-		ktime_get_real_ts64(&ts64);
-		break;
-	}
-	return ts64;
-}
-
 /**
  * snd_rawmidi_receive - receive the input data from the device
  * @substream: the rawmidi substream
@@ -1061,7 +967,6 @@ int snd_rawmidi_receive(struct snd_rawmidi_substream *substream,
 			const unsigned char *buffer, int count)
 {
 	unsigned long flags;
-	struct timespec64 ts64 = get_framing_tstamp(substream);
 	int result = 0, count1;
 	struct snd_rawmidi_runtime *runtime = substream->runtime;
 
@@ -1072,11 +977,8 @@ int snd_rawmidi_receive(struct snd_rawmidi_substream *substream,
 			  "snd_rawmidi_receive: input is not active!!!\n");
 		return -EINVAL;
 	}
-
 	spin_lock_irqsave(&runtime->lock, flags);
-	if (substream->framing == SNDRV_RAWMIDI_MODE_FRAMING_TSTAMP) {
-		result = receive_with_tstamp_framing(substream, buffer, count, &ts64);
-	} else if (count == 1) {	/* special case, faster code */
+	if (count == 1) {	/* special case, faster code */
 		substream->bytes++;
 		if (runtime->avail < runtime->buffer_size) {
 			runtime->buffer[runtime->hw_ptr++] = buffer[0];
@@ -1117,7 +1019,7 @@ int snd_rawmidi_receive(struct snd_rawmidi_substream *substream,
 	if (result > 0) {
 		if (runtime->event)
 			schedule_work(&runtime->event_work);
-		else if (__snd_rawmidi_ready(runtime))
+		else if (snd_rawmidi_ready(substream))
 			wake_up(&runtime->sleep);
 	}
 	spin_unlock_irqrestore(&runtime->lock, flags);
@@ -1196,7 +1098,7 @@ static ssize_t snd_rawmidi_read(struct file *file, char __user *buf, size_t coun
 	result = 0;
 	while (count > 0) {
 		spin_lock_irq(&runtime->lock);
-		while (!__snd_rawmidi_ready(runtime)) {
+		while (!snd_rawmidi_ready(substream)) {
 			wait_queue_entry_t wait;
 
 			if ((file->f_flags & O_NONBLOCK) != 0 || result > 0) {
@@ -1213,11 +1115,9 @@ static ssize_t snd_rawmidi_read(struct file *file, char __user *buf, size_t coun
 				return -ENODEV;
 			if (signal_pending(current))
 				return result > 0 ? result : -ERESTARTSYS;
-			spin_lock_irq(&runtime->lock);
-			if (!runtime->avail) {
-				spin_unlock_irq(&runtime->lock);
+			if (!runtime->avail)
 				return result > 0 ? result : -EIO;
-			}
+			spin_lock_irq(&runtime->lock);
 		}
 		spin_unlock_irq(&runtime->lock);
 		count1 = snd_rawmidi_kernel_read1(substream,
@@ -1355,7 +1255,7 @@ int __snd_rawmidi_transmit_ack(struct snd_rawmidi_substream *substream, int coun
 	runtime->avail += count;
 	substream->bytes += count;
 	if (count > 0) {
-		if (runtime->drain || __snd_rawmidi_ready(runtime))
+		if (runtime->drain || snd_rawmidi_ready(substream))
 			wake_up(&runtime->sleep);
 	}
 	return count;
@@ -1544,11 +1444,9 @@ static ssize_t snd_rawmidi_write(struct file *file, const char __user *buf,
 				return -ENODEV;
 			if (signal_pending(current))
 				return result > 0 ? result : -ERESTARTSYS;
-			spin_lock_irq(&runtime->lock);
-			if (!runtime->avail && !timeout) {
-				spin_unlock_irq(&runtime->lock);
+			if (!runtime->avail && !timeout)
 				return result > 0 ? result : -EIO;
-			}
+			spin_lock_irq(&runtime->lock);
 		}
 		spin_unlock_irq(&runtime->lock);
 		count1 = snd_rawmidi_kernel_write1(substream, buf, NULL, count);
@@ -1628,9 +1526,6 @@ static void snd_rawmidi_proc_info_read(struct snd_info_entry *entry,
 	struct snd_rawmidi *rmidi;
 	struct snd_rawmidi_substream *substream;
 	struct snd_rawmidi_runtime *runtime;
-	unsigned long buffer_size, avail, xruns;
-	unsigned int clock_type;
-	static const char *clock_names[4] = { "none", "realtime", "monotonic", "monotonic raw" };
 
 	rmidi = entry->private_data;
 	snd_iprintf(buffer, "%s\n\n", rmidi->name);
@@ -1649,16 +1544,13 @@ static void snd_rawmidi_proc_info_read(struct snd_info_entry *entry,
 				    "  Owner PID    : %d\n",
 				    pid_vnr(substream->pid));
 				runtime = substream->runtime;
-				spin_lock_irq(&runtime->lock);
-				buffer_size = runtime->buffer_size;
-				avail = runtime->avail;
-				spin_unlock_irq(&runtime->lock);
 				snd_iprintf(buffer,
 				    "  Mode         : %s\n"
 				    "  Buffer size  : %lu\n"
 				    "  Avail        : %lu\n",
 				    runtime->oss ? "OSS compatible" : "native",
-				    buffer_size, avail);
+				    (unsigned long) runtime->buffer_size,
+				    (unsigned long) runtime->avail);
 			}
 		}
 	}
@@ -1676,24 +1568,13 @@ static void snd_rawmidi_proc_info_read(struct snd_info_entry *entry,
 					    "  Owner PID    : %d\n",
 					    pid_vnr(substream->pid));
 				runtime = substream->runtime;
-				spin_lock_irq(&runtime->lock);
-				buffer_size = runtime->buffer_size;
-				avail = runtime->avail;
-				xruns = runtime->xruns;
-				spin_unlock_irq(&runtime->lock);
 				snd_iprintf(buffer,
 					    "  Buffer size  : %lu\n"
 					    "  Avail        : %lu\n"
 					    "  Overruns     : %lu\n",
-					    buffer_size, avail, xruns);
-				if (substream->framing == SNDRV_RAWMIDI_MODE_FRAMING_TSTAMP) {
-					clock_type = substream->clock_type >> SNDRV_RAWMIDI_MODE_CLOCK_SHIFT;
-					if (!snd_BUG_ON(clock_type >= ARRAY_SIZE(clock_names)))
-						snd_iprintf(buffer,
-							    "  Framing      : tstamp\n"
-							    "  Clock type   : %s\n",
-							    clock_names[clock_type]);
-				}
+					    (unsigned long) runtime->buffer_size,
+					    (unsigned long) runtime->avail,
+					    (unsigned long) runtime->xruns);
 			}
 		}
 	}
@@ -1784,7 +1665,7 @@ int snd_rawmidi_new(struct snd_card *card, char *id, int device,
 	INIT_LIST_HEAD(&rmidi->streams[SNDRV_RAWMIDI_STREAM_OUTPUT].substreams);
 
 	if (id != NULL)
-		strscpy(rmidi->id, id, sizeof(rmidi->id));
+		strlcpy(rmidi->id, id, sizeof(rmidi->id));
 
 	snd_device_initialize(&rmidi->dev, card);
 	rmidi->dev.release = release_rawmidi_device;

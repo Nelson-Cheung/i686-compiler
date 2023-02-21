@@ -78,7 +78,6 @@ config QED
 	depends on PCI
 	select ZLIB_INFLATE
 	select CRC8
-	select CRC32
 	select NET_DEVLINK
 	help
 	  This enables the support for Marvell FastLinQ adapters family.
@@ -99,7 +98,7 @@ config QED_SRIOV
 config QEDE
 	tristate "QLogic QED 25/40/100Gb Ethernet NIC"
 	depends on QED
-	depends on PTP_1588_CLOCK_OPTIONAL
+	imply PTP_1588_CLOCK
 	help
 	  This enables the support for Marvell FastLinQ adapters family,
 	  ethernet driver.
@@ -108,9 +107,6 @@ config QED_RDMA
 	bool
 
 config QED_ISCSI
-	bool
-
-config QED_NVMETCP
 	bool
 
 config QED_FCOE

@@ -628,7 +628,7 @@ static int vpbe_initialize(struct device *dev, struct vpbe_device *vpbe_dev)
 		if (err) {
 			v4l2_err(&vpbe_dev->v4l2_dev,
 				 "unable to initialize the OSD device");
-			ret = -ENOMEM;
+			err = -ENOMEM;
 			goto fail_dev_unregister;
 		}
 	}

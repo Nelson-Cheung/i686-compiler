@@ -129,7 +129,7 @@ static void ti_sci_intr_irq_domain_free(struct irq_domain *domain,
  * @virq:	Corresponding Linux virtual IRQ number
  * @hwirq:	Corresponding hwirq for the IRQ within this IRQ domain
  *
- * Returns intr output irq if all went well else appropriate error pointer.
+ * Returns parent irq if all went well else appropriate error pointer.
  */
 static int ti_sci_intr_alloc_parent_irq(struct irq_domain *domain,
 					unsigned int virq, u32 hwirq)
@@ -173,7 +173,7 @@ static int ti_sci_intr_alloc_parent_irq(struct irq_domain *domain,
 	if (err)
 		goto err_msg;
 
-	return out_irq;
+	return p_hwirq;
 
 err_msg:
 	irq_domain_free_irqs_parent(domain, virq, 1);
@@ -198,19 +198,19 @@ static int ti_sci_intr_irq_domain_alloc(struct irq_domain *domain,
 	struct irq_fwspec *fwspec = data;
 	unsigned long hwirq;
 	unsigned int flags;
-	int err, out_irq;
+	int err, p_hwirq;
 
 	err = ti_sci_intr_irq_domain_translate(domain, fwspec, &hwirq, &flags);
 	if (err)
 		return err;
 
-	out_irq = ti_sci_intr_alloc_parent_irq(domain, virq, hwirq);
-	if (out_irq < 0)
-		return out_irq;
+	p_hwirq = ti_sci_intr_alloc_parent_irq(domain, virq, hwirq);
+	if (p_hwirq < 0)
+		return p_hwirq;
 
 	irq_domain_set_hwirq_and_chip(domain, virq, hwirq,
 				      &ti_sci_intr_irq_chip,
-				      (void *)(uintptr_t)out_irq);
+				      (void *)(uintptr_t)p_hwirq);
 
 	return 0;
 }

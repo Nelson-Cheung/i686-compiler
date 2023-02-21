@@ -128,8 +128,8 @@ static int adf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			      &hw_data->fuses);
 
 	/* Get Accelerators and Accelerators Engines masks */
-	hw_data->accel_mask = hw_data->get_accel_mask(hw_data);
-	hw_data->ae_mask = hw_data->get_ae_mask(hw_data);
+	hw_data->accel_mask = hw_data->get_accel_mask(hw_data->fuses);
+	hw_data->ae_mask = hw_data->get_ae_mask(hw_data->fuses);
 	accel_pci_dev->sku = hw_data->get_sku(hw_data);
 	/* If the device has no acceleration engines then ignore it. */
 	if (!hw_data->accel_mask || !hw_data->ae_mask ||
@@ -159,10 +159,17 @@ static int adf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	/* set dma identifier */
-	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(48));
-	if (ret) {
-		dev_err(&pdev->dev, "No usable DMA configuration\n");
-		goto out_err_disable;
+	if (pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
+		if ((pci_set_dma_mask(pdev, DMA_BIT_MASK(32)))) {
+			dev_err(&pdev->dev, "No usable DMA configuration\n");
+			ret = -EFAULT;
+			goto out_err_disable;
+		} else {
+			pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
+		}
+
+	} else {
+		pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
 	}
 
 	if (pci_request_regions(pdev, ADF_DH895XCC_DEVICE_NAME)) {
@@ -170,8 +177,9 @@ static int adf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto out_err_disable;
 	}
 
-	/* Get accelerator capabilities mask */
-	hw_data->accel_capabilities_mask = hw_data->get_accel_cap(accel_dev);
+	/* Read accelerator capabilities mask */
+	pci_read_config_dword(pdev, ADF_DEVICE_LEGFUSE_OFFSET,
+			      &hw_data->accel_capabilities_mask);
 
 	/* Find and map all the device's BARS */
 	i = 0;
@@ -201,12 +209,12 @@ static int adf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (pci_save_state(pdev)) {
 		dev_err(&pdev->dev, "Failed to save pci state\n");
 		ret = -ENOMEM;
-		goto out_err_disable_aer;
+		goto out_err_free_reg;
 	}
 
 	ret = qat_crypto_dev_config(accel_dev);
 	if (ret)
-		goto out_err_disable_aer;
+		goto out_err_free_reg;
 
 	ret = adf_dev_init(accel_dev);
 	if (ret)
@@ -222,8 +230,6 @@ out_err_dev_stop:
 	adf_dev_stop(accel_dev);
 out_err_dev_shutdown:
 	adf_dev_shutdown(accel_dev);
-out_err_disable_aer:
-	adf_disable_aer(accel_dev);
 out_err_free_reg:
 	pci_release_regions(accel_pci_dev->pci_dev);
 out_err_disable:

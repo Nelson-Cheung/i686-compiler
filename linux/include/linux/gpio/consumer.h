@@ -158,7 +158,7 @@ int gpiod_set_raw_array_value_cansleep(unsigned int array_size,
 				       unsigned long *value_bitmap);
 
 int gpiod_set_config(struct gpio_desc *desc, unsigned long config);
-int gpiod_set_debounce(struct gpio_desc *desc, unsigned int debounce);
+int gpiod_set_debounce(struct gpio_desc *desc, unsigned debounce);
 int gpiod_set_transitory(struct gpio_desc *desc, bool transitory);
 void gpiod_toggle_active_low(struct gpio_desc *desc);
 
@@ -481,7 +481,7 @@ static inline int gpiod_set_config(struct gpio_desc *desc, unsigned long config)
 	return -ENOSYS;
 }
 
-static inline int gpiod_set_debounce(struct gpio_desc *desc, unsigned int debounce)
+static inline int gpiod_set_debounce(struct gpio_desc *desc, unsigned debounce)
 {
 	/* GPIO can never have been requested */
 	WARN_ON(desc);
@@ -609,7 +609,7 @@ struct gpio_desc *devm_fwnode_get_gpiod_from_child(struct device *dev,
 #if IS_ENABLED(CONFIG_GPIOLIB) && IS_ENABLED(CONFIG_OF_GPIO)
 struct device_node;
 
-struct gpio_desc *gpiod_get_from_of_node(const struct device_node *node,
+struct gpio_desc *gpiod_get_from_of_node(struct device_node *node,
 					 const char *propname, int index,
 					 enum gpiod_flags dflags,
 					 const char *label);
@@ -619,7 +619,7 @@ struct gpio_desc *gpiod_get_from_of_node(const struct device_node *node,
 struct device_node;
 
 static inline
-struct gpio_desc *gpiod_get_from_of_node(const struct device_node *node,
+struct gpio_desc *gpiod_get_from_of_node(struct device_node *node,
 					 const char *propname, int index,
 					 enum gpiod_flags dflags,
 					 const char *label)
@@ -633,7 +633,7 @@ struct gpio_desc *gpiod_get_from_of_node(const struct device_node *node,
 struct device_node;
 
 struct gpio_desc *devm_gpiod_get_from_of_node(struct device *dev,
-					      const struct device_node *node,
+					      struct device_node *node,
 					      const char *propname, int index,
 					      enum gpiod_flags dflags,
 					      const char *label);
@@ -644,7 +644,7 @@ struct device_node;
 
 static inline
 struct gpio_desc *devm_gpiod_get_from_of_node(struct device *dev,
-					      const struct device_node *node,
+					      struct device_node *node,
 					      const char *propname, int index,
 					      enum gpiod_flags dflags,
 					      const char *label)
@@ -674,15 +674,13 @@ struct acpi_gpio_mapping {
  * get GpioIo type explicitly, this quirk may be used.
  */
 #define ACPI_GPIO_QUIRK_ONLY_GPIOIO		BIT(1)
-/* Use given pin as an absolute GPIO number in the system */
-#define ACPI_GPIO_QUIRK_ABSOLUTE_NUMBER		BIT(2)
 
 	unsigned int quirks;
 };
 
-struct acpi_device;
-
 #if IS_ENABLED(CONFIG_GPIOLIB) && IS_ENABLED(CONFIG_ACPI)
+
+struct acpi_device;
 
 int acpi_dev_add_driver_gpios(struct acpi_device *adev,
 			      const struct acpi_gpio_mapping *gpios);
@@ -692,9 +690,9 @@ int devm_acpi_dev_add_driver_gpios(struct device *dev,
 				   const struct acpi_gpio_mapping *gpios);
 void devm_acpi_dev_remove_driver_gpios(struct device *dev);
 
-struct gpio_desc *acpi_get_and_request_gpiod(char *path, int pin, char *label);
-
 #else  /* CONFIG_GPIOLIB && CONFIG_ACPI */
+
+struct acpi_device;
 
 static inline int acpi_dev_add_driver_gpios(struct acpi_device *adev,
 			      const struct acpi_gpio_mapping *gpios)

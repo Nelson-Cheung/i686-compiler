@@ -45,7 +45,7 @@ SECTIONS {
 		_etext = . ;
 	}
 
-	. = ALIGN (8) ;
+	. = ALIGN (4) ;
 	__fdt_blob : AT(ADDR(__fdt_blob) - LOAD_OFFSET) {
 		_fdt_start = . ;		/* place for fdt blob */
 		*(__fdt_blob) ;			/* Any link-placed DTB */

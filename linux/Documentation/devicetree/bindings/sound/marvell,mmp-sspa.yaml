@@ -51,16 +51,35 @@ properties:
       - const: rx
 
   port:
-    $ref: audio-graph-port.yaml#
-    unevaluatedProperties: false
+    type: object
 
     properties:
       endpoint:
         type: object
 
         properties:
+          remote-endpoint: true
+
+          frame-master:
+            type: boolean
+            description: SoC generates the frame clock
+
+          bitclock-master:
+            type: boolean
+            description: SoC generates the bit clock
+
           dai-format:
+            $ref: /schemas/types.yaml#/definitions/string
+            description: The digital audio format
             const: i2s
+
+        required:
+          - remote-endpoint
+
+    required:
+      - endpoint
+
+    additionalProperties: false
 
 required:
   - "#sound-dai-cells"
@@ -93,6 +112,8 @@ examples:
       port {
         endpoint {
           remote-endpoint = <&rt5631_0>;
+          frame-master;
+          bitclock-master;
           dai-format = "i2s";
         };
       };

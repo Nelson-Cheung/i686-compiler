@@ -291,7 +291,8 @@ static void xgene_msi_isr(struct irq_desc *desc)
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 	struct xgene_msi_group *msi_groups;
 	struct xgene_msi *xgene_msi;
-	int msir_index, msir_val, hw_irq, ret;
+	unsigned int virq;
+	int msir_index, msir_val, hw_irq;
 	u32 intr_index, grp_select, msi_grp;
 
 	chained_irq_enter(chip, desc);
@@ -329,8 +330,10 @@ static void xgene_msi_isr(struct irq_desc *desc)
 			 * CPU0
 			 */
 			hw_irq = hwirq_to_canonical_hwirq(hw_irq);
-			ret = generic_handle_domain_irq(xgene_msi->inner_domain, hw_irq);
-			WARN_ON_ONCE(ret);
+			virq = irq_find_mapping(xgene_msi->inner_domain, hw_irq);
+			WARN_ON(!virq);
+			if (virq != 0)
+				generic_handle_irq(virq);
 			msir_val &= ~(1 << intr_index);
 		}
 		grp_select &= ~(1 << msir_index);
@@ -381,9 +384,13 @@ static int xgene_msi_hwirq_alloc(unsigned int cpu)
 		if (!msi_group->gic_irq)
 			continue;
 
-		irq_set_chained_handler_and_data(msi_group->gic_irq,
-			xgene_msi_isr, msi_group);
-
+		irq_set_chained_handler(msi_group->gic_irq,
+					xgene_msi_isr);
+		err = irq_set_handler_data(msi_group->gic_irq, msi_group);
+		if (err) {
+			pr_err("failed to register GIC IRQ handler\n");
+			return -EINVAL;
+		}
 		/*
 		 * Statically allocate MSI GIC IRQs to each CPU core.
 		 * With 8-core X-Gene v1, 2 MSI GIC IRQs are allocated
@@ -448,6 +455,7 @@ static int xgene_msi_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	xgene_msi->msi_regs = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(xgene_msi->msi_regs)) {
+		dev_err(&pdev->dev, "no reg space\n");
 		rc = PTR_ERR(xgene_msi->msi_regs);
 		goto error;
 	}
